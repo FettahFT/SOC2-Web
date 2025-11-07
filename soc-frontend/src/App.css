@@ -1,0 +1,225 @@
+.App {
+  text-align: center;
+}
+
+.App-header {
+  background-color: #282c34;
+  padding: 40px;
+  min-height: 100vh;
+  color: white;
+}
+
+.mode-selector {
+  margin: 30px 0;
+  display: flex;
+  justify-content: center;
+  gap: 20px;
+}
+
+.mode-selector button {
+  padding: 12px 30px;
+  font-size: 16px;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  background-color: #4a4a4a;
+  color: white;
+  transition: all 0.3s;
+}
+
+.mode-selector button.active {
+  background-color: #22c55e;
+  color: #000000;
+}
+
+.form {
+  background: white;
+  color: #282c34;
+  padding: 30px;
+  border-radius: 12px;
+  max-width: 500px;
+  margin: 0 auto;
+}
+
+.input-group {
+  margin-bottom: 20px;
+  text-align: left;
+}
+
+.input-group label {
+  display: block;
+  margin-bottom: 8px;
+  font-weight: bold;
+}
+
+.input-group input {
+  width: 100%;
+  padding: 10px;
+  border: 2px solid #ddd;
+  border-radius: 6px;
+}
+
+button {
+  width: 100%;
+  padding: 15px;
+  font-size: 18px;
+  background-color: #22c55e;
+  color: #000000;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background-color 0.3s;
+}
+
+button:hover:not(:disabled) {
+  background-color: #00cc33;
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.message {
+  margin-top: 20px;
+  padding: 15px;
+  border-radius: 8px;
+  background-color: #4caf50;
+}
+
+/* Remove ALL blue focus states and ensure green theme */
+* {
+  outline: none !important;
+}
+
+*:focus {
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+*:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+button:focus {
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+button:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+/* Remove browser default button styles */
+button {
+  border: none !important;
+  outline: none !important;
+}
+
+button:active {
+  outline: none !important;
+  border: none !important;
+}
+
+input:focus {
+  outline: none !important;
+  box-shadow: 0 0 10px rgba(0, 255, 65, 0.2) !important;
+}
+
+/* Additional focus ring removal for Tailwind */
+button:focus {
+  --tw-ring-color: transparent !important;
+  --tw-ring-offset-color: transparent !important;
+  --tw-ring-offset-width: 0px !important;
+  box-shadow: none !important;
+}
+
+button:focus-visible {
+  --tw-ring-color: transparent !important;
+  --tw-ring-offset-color: transparent !important;
+  --tw-ring-offset-width: 0px !important;
+  box-shadow: none !important;
+}
+
+/* Force remove any focus rings */
+button {
+  --tw-ring-color: transparent !important;
+  --tw-ring-offset-color: transparent !important;
+  --tw-ring-offset-width: 0px !important;
+}
+
+/* Mode selector button specific styles */
+.mode-button {
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+.mode-button:focus,
+.mode-button:focus-visible,
+.mode-button:active,
+.mode-button:hover {
+  outline: none !important;
+  box-shadow: none !important;
+  --tw-ring-color: transparent !important;
+  --tw-ring-offset-color: transparent !important;
+  --tw-ring-offset-width: 0px !important;
+}
+
+/* Override any Tailwind focus ring utilities */
+.focus\:ring-0:focus {
+  --tw-ring-offset-shadow: none !important;
+  --tw-ring-shadow: none !important;
+  box-shadow: none !important;
+}
+
+/* Remove any webkit focus rings */
+.mode-button::-moz-focus-inner {
+  border: 0 !important;
+}
+
+.mode-button:focus {
+  -webkit-box-shadow: none !important;
+  -moz-box-shadow: none !important;
+  box-shadow: none !important;
+}
+/* Completely disable all hover effects on mode buttons */
+.mode-selector-button,
+.mode-selector-button:hover,
+.mode-selector-button:focus,
+.mode-selector-button:active {
+  background-color: transparent !important;
+  box-shadow: none !important;
+  border: none !important;
+  outline: none !important;
+}
+
+/* Moving border for mode selector */
+.mode-selector-container {
+  position: relative;
+}
+
+.moving-border {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: calc(50% - 1px);
+  height: calc(100% - 4px);
+  border: 2px solid #22c55e;
+  border-radius: 6px;
+  transition: transform 0.3s ease;
+  pointer-events: none;
+  box-shadow: 0 0 10px rgba(34, 197, 94, 0.5);
+  background: rgba(34, 197, 94, 0.15);
+  z-index: 1;
+}
+
+.mode-selector-button {
+  position: relative;
+  z-index: 2;
+}
+
+.moving-border.decrypt {
+  transform: translateX(calc(100% + 2px));
+}
