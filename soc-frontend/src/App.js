@@ -144,25 +144,6 @@ function App() {
             processing: 'client'
           });
         }
-      } else if (mode === 'metadata') {
-        // Extract metadata only
-        try {
-          const metadata = await ClientImageProcessor.extractMetadataAsync(file);
-          setProgress(100);
-          setResult({
-            success: true,
-            metadata: metadata,
-            processing: 'client'
-          });
-        } catch (error) {
-          setProgress(100);
-          setResult({
-            success: false,
-            message: error.message,
-            processing: 'client'
-          });
-        }
-      } else {
       } catch (error) {
         setProgress(100);
         setResult({
