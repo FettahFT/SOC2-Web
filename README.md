@@ -1,12 +1,18 @@
-#  ShadeOfColor2 - Web UI
+# ShadeOfColor2 - Web UI
 
 A purely client-side web application for hiding files inside PNG images using steganography. This project is a web-based user interface for the concepts demonstrated in the original [ShadeOfColor2 C# application by @archistico](https://github.com/archistico/ShadeOfColor2).
 
-**[➡️ Go to the Live Web App Here! ⬅️]** *(<- Add your Vercel deployment link here!)*
+<br/>
+
+<p align="center">
+  <a href="https://soc-2-web.vercel.app/">
+    <img src="https://img.shields.io/badge/LIVE%20APP-Click%20Here-brightgreen?style=for-the-badge&logo=vercel" alt="Live App" />
+  </a>
+</p>
 
 ---
 
-![image](https://github.com/user-attachments/assets/e5205f8a-c393-431c-889a-033011145099)
+![screenshot.png](assets/screenshot.png)
 
 ## 🚀 How to Use
 
@@ -42,8 +48,8 @@ The following instructions are for developers who want to modify the code or con
 
 1.  **Clone the repository:**
     ```bash
-    git clone https://github.com/your-username/your-repo-name.git
-    cd your-repo-name
+    git clone https://github.com/FettahFT/SOC2-web.git
+    cd SOC2-web
     ```
 
 2.  **Install dependencies:**

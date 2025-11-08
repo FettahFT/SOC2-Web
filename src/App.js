@@ -338,14 +338,23 @@ function App() {
         </div>
 
         {/* Footer */}
-        <footer className="text-center mt-12 text-green-600 text-sm">
+        <footer className="text-center mt-12 text-green-600 text-sm space-x-4">
           <a 
             href="https://github.com/archistico/ShadeOfColor2" 
             target="_blank" 
             rel="noopener noreferrer"
             className="hover:text-green-400 hover:underline"
           >
-            &gt; Fork of ShadeOfColor2 by @archistico
+            &gt; Original by @archistico
+          </a>
+          <span>|</span>
+          <a 
+            href="https://github.com/FettahFT/SOC2-web" 
+            target="_blank" 
+            rel="noopener noreferrer"
+            className="hover:text-green-400 hover:underline"
+          >
+            Fork by @FettahFT
           </a>
         </footer>
       </div>
