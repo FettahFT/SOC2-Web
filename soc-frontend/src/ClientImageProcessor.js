@@ -40,17 +40,20 @@ class ClientImageProcessor {
 
     // Create header
     const header = this.createHeader(processedData.byteLength, fileName, sha256Hash, isEncrypted);
+    console.log('Header created, length:', header.length);
     onProgress?.(40);
 
     // Combine header and data
     const totalData = new Uint8Array(header.length + processedData.byteLength);
     totalData.set(header, 0);
     totalData.set(new Uint8Array(processedData), header.length);
+    console.log('Total data length:', totalData.length);
     onProgress?.(50);
 
     // Calculate image dimensions
     const pixelCount = Math.ceil(totalData.length / this.BYTES_PER_PIXEL);
     const imageSize = Math.ceil(Math.sqrt(pixelCount));
+    console.log('Pixel count:', pixelCount, 'Image size:', imageSize, 'Total pixels needed:', imageSize * imageSize);
     onProgress?.(60);
 
     // Create canvas and encode data
@@ -104,10 +107,12 @@ class ClientImageProcessor {
 
           // Read header
           const headerInfo = this.readHeader(pixelData);
+          console.log('Header info:', headerInfo);
           onProgress?.(40);
 
           // Read file data
           const fileData = this.readFileData(pixelData, headerInfo.totalHeaderSize, headerInfo.fileSize);
+          console.log('File data length:', fileData.length, 'Expected:', headerInfo.fileSize);
           onProgress?.(60);
 
           // Verify hash
@@ -245,40 +250,37 @@ class ClientImageProcessor {
   }
 
   static readHeader(pixelData) {
-    let offset = 0;
-
-    // Signature
-    const signature = String.fromCharCode(pixelData[offset], pixelData[offset + 1]);
-    offset += 2;
+    // Read signature (first 2 bytes)
+    const signatureBytes = this.readBytesFromPixelData(pixelData, 0, 2);
+    const signature = String.fromCharCode(signatureBytes[0], signatureBytes[1]);
 
     if (signature !== this.SIGNATURE) {
       throw new Error(`Invalid signature '${signature}'. This is not a ShadeOfColor2 encoded image.`);
     }
 
-    // File size
-    const fileSize = new DataView(pixelData.buffer.slice(offset, offset + 8)).getUint32(0, true) +
-                     (new DataView(pixelData.buffer.slice(offset, offset + 8)).getUint32(4, true) * 0x100000000);
-    offset += 8;
+    // Read file size (8 bytes starting at offset 2)
+    const fileSizeBytes = this.readBytesFromPixelData(pixelData, 2, 8);
+    const fileSize = new DataView(fileSizeBytes.buffer).getUint32(0, true) +
+                     (new DataView(fileSizeBytes.buffer).getUint32(4, true) * 0x100000000);
 
-    // Filename length
-    const fileNameLength = new DataView(pixelData.buffer.slice(offset, offset + 4)).getUint32(0, true);
-    offset += 4;
+    // Read filename length (4 bytes starting at offset 10)
+    const fileNameLengthBytes = this.readBytesFromPixelData(pixelData, 10, 4);
+    const fileNameLength = new DataView(fileNameLengthBytes.buffer).getUint32(0, true);
 
-    // Filename
-    const fileNameBytes = pixelData.slice(offset, offset + fileNameLength);
+    // Read filename
+    const fileNameBytes = this.readBytesFromPixelData(pixelData, 14, fileNameLength);
     const fileName = new TextDecoder().decode(fileNameBytes);
-    offset += fileNameLength;
 
-    // IsEncrypted
-    const isEncrypted = pixelData[offset] === 1;
-    offset += 1;
+    // Read isEncrypted (1 byte)
+    const isEncryptedBytes = this.readBytesFromPixelData(pixelData, 14 + fileNameLength, 1);
+    const isEncrypted = isEncryptedBytes[0] === 1;
 
-    // Skip padding
+    // Calculate SHA256 offset
     const headerWithoutHash = 2 + 8 + 4 + fileNameLength + 1;
     const sha256Offset = headerWithoutHash + (4 - (headerWithoutHash % 4)) % 4;
 
-    // SHA256 hash
-    const sha256Hash = pixelData.slice(sha256Offset, sha256Offset + this.SHA256_SIZE);
+    // Read SHA256 hash
+    const sha256Hash = this.readBytesFromPixelData(pixelData, sha256Offset, this.SHA256_SIZE);
 
     return {
       signature,
@@ -290,18 +292,46 @@ class ClientImageProcessor {
     };
   }
 
+  static readBytesFromPixelData(pixelData, startIndex, length) {
+    const bytes = new Uint8Array(length);
+    for (let i = 0; i < length; i++) {
+      const pixelIndex = startIndex + i;
+      const pixelOffset = pixelIndex % 4;
+      const pixelPosition = Math.floor(pixelIndex / 4);
+      const arrayIndex = pixelPosition * 4 + pixelOffset;
+
+      if (arrayIndex < pixelData.length) {
+        bytes[i] = pixelData[arrayIndex];
+      }
+    }
+    return bytes;
+  }
+
   static readFileData(pixelData, startOffset, fileSize) {
     const data = new Uint8Array(fileSize);
     for (let i = 0; i < fileSize; i++) {
       const pixelIndex = startOffset + i;
-      data[i] = pixelData[pixelIndex];
+      const pixelOffset = pixelIndex % 4;
+      const pixelPosition = Math.floor(pixelIndex / 4);
+      const arrayIndex = pixelPosition * 4 + pixelOffset;
+
+      if (arrayIndex < pixelData.length) {
+        data[i] = pixelData[arrayIndex];
+      }
     }
     return data;
   }
 
   static writeBytesToImageData(imageData, bytes) {
     for (let i = 0; i < bytes.length; i++) {
-      imageData[i] = bytes[i];
+      const pixelIndex = i;
+      const pixelOffset = pixelIndex % 4;
+      const pixelPosition = Math.floor(pixelIndex / 4);
+      const arrayIndex = pixelPosition * 4 + pixelOffset;
+
+      if (arrayIndex < imageData.length) {
+        imageData[arrayIndex] = bytes[i];
+      }
     }
   }
 
