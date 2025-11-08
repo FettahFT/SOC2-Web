@@ -1,7 +1,6 @@
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using System.Security.Cryptography;
-using SixLabors.ImageSharp.Formats;
 
 namespace ShadeOfColor2.Core.Services;
 
@@ -30,27 +29,21 @@ public class ImageProcessor : IImageProcessor
 
     public async Task<Image<Rgba32>> CreateCarrierImageAsync(Stream fileData, string fileName, CancellationToken cancellationToken = default)
     {
-        // Read entire file into memory to avoid stream consumption issues
-        byte[] fileBytes;
-        if (fileData is MemoryStream ms && fileData.CanSeek)
-        {
-            fileBytes = ms.ToArray();
-        }
-        else
-        {
-            using var tempStream = new MemoryStream();
-            await fileData.CopyToAsync(tempStream, cancellationToken);
-            fileBytes = tempStream.ToArray();
-        }
-        
-        var fileSize = fileBytes.Length;
+        // Stream file data in chunks to reduce memory usage
+        var fileSize = fileData.CanSeek ? fileData.Length : await GetStreamLengthAsync(fileData);
         
         // Validate file size early
         if (fileSize > MaxFileSize)
             throw new ArgumentException($"File too large. Maximum size is {MaxFileSize / (1024 * 1024)}MB.");
 
-        // Calculate SHA256 hash from byte array
-        var sha256Hash = SHA256.HashData(fileBytes);
+        // Calculate SHA256 hash using streaming
+        var sha256Hash = await CalculateHashStreamingAsync(fileData, cancellationToken);
+        
+        // Reset stream for reading
+        if (fileData.CanSeek)
+            fileData.Position = 0;
+
+
         
         // Convert filename to bytes
         var fileNameBytes = System.Text.Encoding.UTF8.GetBytes(fileName);
@@ -75,16 +68,11 @@ public class ImageProcessor : IImageProcessor
         WriteHeader(image, pixelIndex, fileSize, fileNameBytes, sha256Hash);
         pixelIndex += totalHeaderSize;
 
-        // Write file data from byte array
-        WriteBytesToImage(image, pixelIndex, fileBytes);
+        // Write file data using streaming
+        await WriteFileDataStreamingAsync(image, pixelIndex, fileData, cancellationToken);
         
-        // Verify data was written correctly
-        var testSignature = ReadBytesFromImage(image, 0, 2);
-        var testSig = System.Text.Encoding.ASCII.GetString(testSignature);
-        Console.WriteLine($"[{DateTime.UtcNow}] Encryption - Written signature: '{testSig}', Expected: '{_signature}'");
-        
-        // Force garbage collection after processing large file
-        if (fileSize > 10 * 1024 * 1024) // 10MB+
+        // Force GC for large files
+        if (fileSize > 10 * 1024 * 1024)
         {
             GC.Collect();
             GC.WaitForPendingFinalizers();
@@ -130,6 +118,58 @@ public class ImageProcessor : IImageProcessor
         WriteBytesToImage(image, startIndex, bytes);
     }
 
+    private async Task WriteFileDataStreamingAsync(Image<Rgba32> image, int startIndex, Stream fileData, CancellationToken cancellationToken)
+    {
+        const int chunkSize = 1024 * 1024; // 1MB chunks
+        var buffer = new byte[chunkSize];
+        var currentIndex = startIndex;
+        int bytesRead;
+        
+        while ((bytesRead = await fileData.ReadAsync(buffer, 0, chunkSize, cancellationToken)) > 0)
+        {
+            var chunk = bytesRead == chunkSize ? buffer : buffer[..bytesRead];
+            WriteBytesToImage(image, currentIndex, chunk);
+            currentIndex += bytesRead;
+            
+            // Clear buffer for next read
+            if (bytesRead < chunkSize)
+                Array.Clear(buffer, bytesRead, chunkSize - bytesRead);
+        }
+    }
+    
+    private async Task<byte[]> CalculateHashStreamingAsync(Stream stream, CancellationToken cancellationToken)
+    {
+        using var sha256 = SHA256.Create();
+        const int bufferSize = 64 * 1024; // 64KB buffer
+        var buffer = new byte[bufferSize];
+        int bytesRead;
+        
+        while ((bytesRead = await stream.ReadAsync(buffer, 0, bufferSize, cancellationToken)) > 0)
+        {
+            sha256.TransformBlock(buffer, 0, bytesRead, null, 0);
+        }
+        
+        sha256.TransformFinalBlock(Array.Empty<byte>(), 0, 0);
+        return sha256.Hash ?? throw new InvalidOperationException("Hash calculation failed");
+    }
+    
+    private async Task<long> GetStreamLengthAsync(Stream stream)
+    {
+        if (stream.CanSeek)
+            return stream.Length;
+            
+        long totalBytes = 0;
+        var buffer = new byte[8192];
+        int bytesRead;
+        
+        while ((bytesRead = await stream.ReadAsync(buffer, 0, buffer.Length)) > 0)
+        {
+            totalBytes += bytesRead;
+        }
+        
+        return totalBytes;
+    }
+
     private void WriteBytesToImage(Image<Rgba32> image, int startIndex, byte[] data)
     {
         image.ProcessPixelRows(accessor =>
@@ -160,44 +200,41 @@ public class ImageProcessor : IImageProcessor
 
     public async Task<ExtractedFile> ExtractFileAsync(Stream imageStream, CancellationToken cancellationToken = default)
     {
-        Image<Rgba32>? image = null;
-        byte[]? fileData = null;
         try
         {
             // Reset stream position if possible
             if (imageStream.CanSeek && imageStream.Position != 0)
             {
-                imageStream.Position = 0;
+                try
+                {
+                    imageStream.Position = 0;
+                }
+                catch (NotSupportedException)
+                {
+                    // Stream doesn't support seeking, continue anyway
+                }
             }
-            
-            // Load image directly from stream
-            image = await Image.LoadAsync<Rgba32>(imageStream, cancellationToken);
-            
-            Console.WriteLine($"[{DateTime.UtcNow}] Image loaded successfully: {image.Width}x{image.Height}");
+                
+            // Load image
+            var image = await Image.LoadAsync<Rgba32>(imageStream, cancellationToken);
         
-            // Read and verify signature with hex debugging
+            // Read and verify signature
             var signatureBytes = ReadBytesFromImage(image, 0, 2);
             var signature = System.Text.Encoding.ASCII.GetString(signatureBytes);
-            var hexSig = Convert.ToHexString(signatureBytes);
-            Console.WriteLine($"[{DateTime.UtcNow}] Read signature: '{signature}' (hex: {hexSig}), Expected: '{_signature}' (hex: {Convert.ToHexString(System.Text.Encoding.ASCII.GetBytes(_signature))})");
-            
             if (signature != _signature)
-                throw new InvalidDataException($"Invalid signature. Found '{signature}', expected '{_signature}'. This is not a ShadeOfColor2 encoded image.");
+                throw new InvalidDataException("Invalid signature. This is not a ShadeOfColor2 encoded image.");
 
             // Read file size
             var fileSizeBytes = ReadBytesFromImage(image, 2, 8);
             var fileSize = BitConverter.ToInt64(fileSizeBytes);
-            Console.WriteLine($"[{DateTime.UtcNow}] File size: {fileSize} bytes");
 
             // Read filename length
             var fileNameLengthBytes = ReadBytesFromImage(image, 10, 4);
             var fileNameLength = BitConverter.ToInt32(fileNameLengthBytes);
-            Console.WriteLine($"[{DateTime.UtcNow}] Filename length: {fileNameLength}");
 
             // Read filename
             var fileNameBytes = ReadBytesFromImage(image, 14, fileNameLength);
             var fileName = System.Text.Encoding.UTF8.GetString(fileNameBytes);
-            Console.WriteLine($"[{DateTime.UtcNow}] Filename: '{fileName}'");
 
             // Calculate SHA256 offset (account for padding)
             var headerWithoutHash = 2 + 8 + 4 + fileNameLength;
@@ -206,59 +243,33 @@ public class ImageProcessor : IImageProcessor
             // Read SHA256 hash
             var sha256Hash = ReadBytesFromImage(image, sha256Offset, Sha256HashSize);
 
-            // Read file data
+            // Read file data using streaming for large files
             var fileDataOffset = sha256Offset + Sha256HashSize;
-            fileData = ReadBytesFromImage(image, fileDataOffset, (int)fileSize);
-
-            // Dispose image immediately after reading data
-            image.Dispose();
-            image = null;
+            byte[] fileData;
+            
+            if (fileSize > 5 * 1024 * 1024) // 5MB+
+            {
+                fileData = await ReadFileDataStreamingAsync(image, fileDataOffset, (int)fileSize, cancellationToken);
+                
+                // Force GC for large files
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+            }
+            else
+            {
+                fileData = ReadBytesFromImage(image, fileDataOffset, (int)fileSize);
+            }
 
             // Verify SHA256 hash
             var computedHash = SHA256.HashData(fileData);
             if (!computedHash.SequenceEqual(sha256Hash))
-            {
-                // Clear file data on hash mismatch
-                Array.Clear(fileData, 0, fileData.Length);
                 throw new InvalidDataException("SHA256 hash mismatch. File may be corrupted.");
-            }
-
-            // Force garbage collection for large files
-            if (fileSize > 5 * 1024 * 1024) // 5MB+
-            {
-                GC.Collect();
-                GC.WaitForPendingFinalizers();
-                GC.Collect();
-            }
 
             return new ExtractedFile(fileName, fileData, sha256Hash);
-        }
-        catch (OperationCanceledException)
-        {
-            // Clean up on cancellation
-            if (fileData != null)
-            {
-                Array.Clear(fileData, 0, fileData.Length);
-            }
-            throw;
-        }
-        catch (UnknownImageFormatException ex)
-        {
-            Console.WriteLine($"[{DateTime.UtcNow}] UnknownImageFormatException: {ex.Message}");
-            throw new InvalidDataException("This image was not created by ShadeOfColor2 or the file is corrupted.");
         }
         catch (Exception ex)
         {
             throw new InvalidDataException($"Failed to extract file from image: {ex.Message}", ex);
-        }
-        finally
-        {
-            // Ensure proper disposal
-            image?.Dispose();
-            
-            // Force cleanup on cancellation or error
-            GC.Collect();
-            GC.WaitForPendingFinalizers();
         }
     }
 
@@ -292,5 +303,31 @@ public class ImageProcessor : IImageProcessor
         });
         
         return bytes;
+    }
+    
+    private async Task<byte[]> ReadFileDataStreamingAsync(Image<Rgba32> image, int startIndex, int length, CancellationToken cancellationToken)
+    {
+        const int chunkSize = 512 * 1024; // 512KB chunks
+        var result = new byte[length];
+        var processedBytes = 0;
+        
+        while (processedBytes < length)
+        {
+            var remainingBytes = length - processedBytes;
+            var currentChunkSize = Math.Min(chunkSize, remainingBytes);
+            
+            var chunk = ReadBytesFromImage(image, startIndex + processedBytes, currentChunkSize);
+            Array.Copy(chunk, 0, result, processedBytes, currentChunkSize);
+            
+            processedBytes += currentChunkSize;
+            
+            // Check cancellation and yield control
+            cancellationToken.ThrowIfCancellationRequested();
+            
+            if (processedBytes % (2 * 1024 * 1024) == 0) // Every 2MB
+                await Task.Yield();
+        }
+        
+        return result;
     }
 }
