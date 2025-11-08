@@ -40,14 +40,14 @@ class ClientImageProcessor {
 
     // Create header
     const header = this.createHeader(processedData.byteLength, fileName, sha256Hash, isEncrypted);
-    console.log('Header created, length:', header.length);
+    console.log('Header created, length:', header.length, 'First 10 bytes:', Array.from(header.slice(0, 10)));
     onProgress?.(40);
 
     // Combine header and data
     const totalData = new Uint8Array(header.length + processedData.byteLength);
     totalData.set(header, 0);
     totalData.set(new Uint8Array(processedData), header.length);
-    console.log('Total data length:', totalData.length);
+    console.log('Total data length:', totalData.length, 'First 10 bytes:', Array.from(totalData.slice(0, 10)));
     onProgress?.(50);
 
     // Calculate image dimensions
@@ -158,6 +158,7 @@ class ClientImageProcessor {
 
     return new Promise((resolve, reject) => {
       img.onload = () => {
+        console.log('Loaded image dimensions:', img.width, 'x', img.height);
         canvas.width = img.width;
         canvas.height = img.height;
         ctx.drawImage(img, 0, 0);
@@ -165,6 +166,7 @@ class ClientImageProcessor {
         try {
           const imageData = ctx.getImageData(0, 0, img.width, img.height);
           const pixelData = imageData.data;
+          console.log('Canvas imageData length:', pixelData.length, 'first 16 bytes:', Array.from(pixelData.slice(0, 16)));
 
           const headerInfo = this.readHeader(pixelData);
 
@@ -252,6 +254,7 @@ class ClientImageProcessor {
   static readHeader(pixelData) {
     // Read signature (first 2 bytes)
     const signatureBytes = this.readBytesFromPixelData(pixelData, 0, 2);
+    console.log('Signature bytes read:', signatureBytes, 'as chars:', String.fromCharCode(signatureBytes[0], signatureBytes[1]));
     const signature = String.fromCharCode(signatureBytes[0], signatureBytes[1]);
 
     if (signature !== this.SIGNATURE) {
@@ -294,6 +297,7 @@ class ClientImageProcessor {
 
   static readBytesFromPixelData(pixelData, startIndex, length) {
     const bytes = new Uint8Array(length);
+    console.log(`Reading ${length} bytes from pixelData starting at ${startIndex}`);
     for (let i = 0; i < length; i++) {
       const pixelIndex = startIndex + i;
       const pixelOffset = pixelIndex % 4;
@@ -303,7 +307,9 @@ class ClientImageProcessor {
       if (arrayIndex < pixelData.length) {
         bytes[i] = pixelData[arrayIndex];
       }
+      if (i < 10) console.log(`Byte ${i}: pixelIndex=${pixelIndex}, offset=${pixelOffset}, position=${pixelPosition}, arrayIndex=${arrayIndex}, value=${bytes[i]}`);
     }
+    console.log(`Read bytes:`, Array.from(bytes.slice(0, Math.min(10, length))));
     return bytes;
   }
 
@@ -323,6 +329,7 @@ class ClientImageProcessor {
   }
 
   static writeBytesToImageData(imageData, bytes) {
+    console.log('Writing bytes to imageData, first 10 bytes:', Array.from(bytes.slice(0, 10)));
     for (let i = 0; i < bytes.length; i++) {
       const pixelIndex = i;
       const pixelOffset = pixelIndex % 4;
@@ -333,6 +340,7 @@ class ClientImageProcessor {
         imageData[arrayIndex] = bytes[i];
       }
     }
+    console.log('After writing, imageData first 16 bytes:', Array.from(imageData.slice(0, 16)));
   }
 
   static async encryptData(data, password) {
