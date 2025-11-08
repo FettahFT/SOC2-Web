@@ -163,7 +163,7 @@ app.MapGet("/config/streaming", (StreamingConfiguration config) =>
 .RequireRateLimiting("health");
 
 // Encode endpoint - hide file in image
-app.MapPost("/api/hide", async (IFormFile file, ITrueStreamingImageProcessor processor) =>
+app.MapPost("/api/hide", async (IFormFile? file, ITrueStreamingImageProcessor processor) =>
 {
     Console.WriteLine($"[{DateTime.UtcNow}] Hide endpoint accessed - File: {file?.FileName}");
     
@@ -178,7 +178,7 @@ app.MapPost("/api/hide", async (IFormFile file, ITrueStreamingImageProcessor pro
     }
     
     // Validate input
-    var validationResult = ValidateUploadedFile(file);
+    var validationResult = ValidateUploadedFile(file!);
     if (validationResult != null)
         return validationResult;
 
@@ -187,21 +187,22 @@ app.MapPost("/api/hide", async (IFormFile file, ITrueStreamingImageProcessor pro
         // Generate random PNG name to hide original file type
         var randomName = $"image_{Guid.NewGuid().ToString("N")[..8]}.png";
         
-        // True streaming - direct to HTTP response
-        return Results.Stream(
-            async (outputStream, cancellationToken) =>
-            {
-                using var fileStream = file.OpenReadStream();
-                await processor.CreateCarrierStreamAsync(
-                    fileStream, 
-                    Path.GetFileName(file.FileName),
-                    outputStream,
-                    cancellationToken
-                );
-                
-                // Minimal cleanup
-                GC.Collect(0, GCCollectionMode.Optimized);
-            },
+        // Create memory stream for compatibility
+        using var outputStream = new MemoryStream();
+        using var fileStream = file.OpenReadStream();
+        
+        await processor.CreateCarrierStreamAsync(
+            fileStream, 
+            Path.GetFileName(file.FileName),
+            outputStream,
+            CancellationToken.None
+        );
+        
+        // Minimal cleanup
+        GC.Collect(0, GCCollectionMode.Optimized);
+        
+        return Results.File(
+            outputStream.ToArray(),
             "image/png",
             randomName
         );
@@ -221,7 +222,7 @@ app.MapPost("/api/hide", async (IFormFile file, ITrueStreamingImageProcessor pro
 .Produces(400);
 
 // Decode endpoint - extract file from image
-app.MapPost("/api/extract", async (HttpContext context, IFormFile image, IImageProcessor processor) =>
+app.MapPost("/api/extract", async (HttpContext context, IFormFile? image, IImageProcessor processor) =>
 {
     Console.WriteLine($"[{DateTime.UtcNow}] Extract endpoint accessed - Image: {image?.FileName}");
     
@@ -236,7 +237,7 @@ app.MapPost("/api/extract", async (HttpContext context, IFormFile image, IImageP
     }
     
     // Validate input
-    var validationResult = ValidateUploadedImage(image);
+    var validationResult = ValidateUploadedImage(image!);
     if (validationResult != null)
         return validationResult;
 
@@ -275,7 +276,7 @@ app.MapPost("/api/extract", async (HttpContext context, IFormFile image, IImageP
 app.Run();
 
 // Helper method for file validation
-static IResult? ValidateUploadedFile(IFormFile file)
+static IResult? ValidateUploadedFile(IFormFile? file)
 {
     if (file == null || file.Length == 0)
         return Results.BadRequest(new { error = "No file uploaded" });
@@ -290,7 +291,7 @@ static IResult? ValidateUploadedFile(IFormFile file)
 }
 
 // Helper method for image validation
-static IResult? ValidateUploadedImage(IFormFile image)
+static IResult? ValidateUploadedImage(IFormFile? image)
 {
     if (image == null || image.Length == 0)
         return Results.BadRequest(new { error = "No image uploaded" });

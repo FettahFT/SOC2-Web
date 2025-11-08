@@ -8,7 +8,7 @@ public class TrueStreamingImageProcessor : ITrueStreamingImageProcessor
     private const int MaxFileSize = 50 * 1024 * 1024; // 50MB
     private const int MaxFilenameLength = 255;
     
-    public async Task<Image<Rgba32>> CreateCarrierImageAsync(Stream fileData, string fileName, CancellationToken cancellationToken = default)
+    public Task<Image<Rgba32>> CreateCarrierImageAsync(Stream fileData, string fileName, CancellationToken cancellationToken = default)
     {
         // This method is kept for interface compatibility but shouldn't be used
         // Use CreateCarrierStreamAsync instead
