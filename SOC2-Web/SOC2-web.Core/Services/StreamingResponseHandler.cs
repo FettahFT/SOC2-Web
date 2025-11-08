@@ -1,7 +1,6 @@
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Formats.Png;
-using Microsoft.AspNetCore.Http;
 
 namespace ShadeOfColor2.Core.Services;
 
@@ -16,11 +15,5 @@ public static class StreamingResponseHandler
         };
         
         await image.SaveAsync(outputStream, encoder, cancellationToken);
-    }
-    
-    public static IResult CreateStreamingFileResult(byte[] fileData, string contentType, string fileName)
-    {
-        var stream = new MemoryStream(fileData);
-        return Results.Stream(stream, contentType, fileName, enableRangeProcessing: false);
     }
 }

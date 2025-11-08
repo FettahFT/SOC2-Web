@@ -1,6 +1,5 @@
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
-using Microsoft.Extensions.Logging;
 
 namespace ShadeOfColor2.Core.Services;
 
@@ -9,17 +8,13 @@ public class ResilientImageProcessor : IImageProcessor
     private readonly StreamingImageProcessor _streamingProcessor;
     private readonly ImageProcessor _fallbackProcessor;
     private readonly StreamingConfiguration _config;
-    private readonly ILogger<ResilientImageProcessor> _logger;
     private readonly SemaphoreSlim _concurrencyLimiter;
 
-    public ResilientImageProcessor(
-        StreamingConfiguration config, 
-        ILogger<ResilientImageProcessor> logger)
+    public ResilientImageProcessor(StreamingConfiguration config)
     {
         _streamingProcessor = new StreamingImageProcessor();
         _fallbackProcessor = new ImageProcessor();
         _config = config;
-        _logger = logger;
         _concurrencyLimiter = new SemaphoreSlim(_config.MaxConcurrentStreams);
     }
 
@@ -30,7 +25,7 @@ public class ResilientImageProcessor : IImageProcessor
         
         if (!shouldUseStreaming)
         {
-            _logger.LogDebug("Using fallback processor for file: {FileName}", fileName);
+            Console.WriteLine($"Using fallback processor for file: {fileName}");
             StreamingMetrics.IncrementFallbackRequests();
             return await _fallbackProcessor.CreateCarrierImageAsync(fileData, fileName, cancellationToken);
         }
@@ -39,7 +34,7 @@ public class ResilientImageProcessor : IImageProcessor
         await _concurrencyLimiter.WaitAsync(cancellationToken);
         try
         {
-            _logger.LogDebug("Using streaming processor for file: {FileName}", fileName);
+            Console.WriteLine($"Using streaming processor for file: {fileName}");
             StreamingMetrics.IncrementStreamingRequests();
             
             using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(_config.StreamTimeoutSeconds));
@@ -49,7 +44,7 @@ public class ResilientImageProcessor : IImageProcessor
         }
         catch (Exception ex) when (_config.EnableFallback)
         {
-            _logger.LogWarning(ex, "Streaming failed for {FileName}, falling back to standard processing", fileName);
+            Console.WriteLine($"Streaming failed for {fileName}, falling back: {ex.Message}");
             StreamingMetrics.IncrementStreamingErrors();
             
             // Reset stream if possible
@@ -75,7 +70,7 @@ public class ResilientImageProcessor : IImageProcessor
         }
         catch (Exception ex) when (_config.EnableFallback)
         {
-            _logger.LogWarning(ex, "Streaming extraction failed, falling back to standard processing");
+            Console.WriteLine($"Streaming extraction failed, falling back: {ex.Message}");
             
             // Reset stream if possible
             if (imageStream.CanSeek)
@@ -92,7 +87,7 @@ public class ResilientImageProcessor : IImageProcessor
         // Check memory pressure
         if (MemoryMonitor.IsMemoryPressureHigh())
         {
-            _logger.LogDebug("High memory pressure detected, using streaming");
+            Console.WriteLine("High memory pressure detected, using streaming");
             return true;
         }
 

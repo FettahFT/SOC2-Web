@@ -7,8 +7,8 @@ var builder = WebApplication.CreateBuilder(args);
 
 // Register services
 builder.Services.AddSingleton<StreamingConfiguration>(new StreamingConfiguration());
-builder.Services.AddSingleton<IImageProcessor, ResilientImageProcessor>();
-builder.Services.AddLogging();
+builder.Services.AddSingleton<IImageProcessor>(provider => 
+    new ResilientImageProcessor(provider.GetRequiredService<StreamingConfiguration>()));
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddAntiforgery();
 
@@ -214,10 +214,11 @@ app.MapPost("/api/extract", async (HttpContext context, IFormFile image, IImageP
         // Add custom header for reliable filename extraction
         context.Response.Headers.Add("X-Original-Filename", originalFileName);
         
-        return StreamingResponseHandler.CreateStreamingFileResult(
-            extractedFile.Data,
+        return Results.Stream(
+            new MemoryStream(extractedFile.Data),
             "application/octet-stream",
-            originalFileName
+            originalFileName,
+            enableRangeProcessing: false
         );
     }
     catch (InvalidDataException ex)
