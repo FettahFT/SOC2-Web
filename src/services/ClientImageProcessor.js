@@ -1,85 +1,75 @@
 /**
  * Client-side Image Processor for Steganography
- * Ports the C# ImageProcessor.cs logic to JavaScript using Canvas API and Web Crypto API
+ * Supports two methods:
+ * 1. Generate: Creates a new noisy image from the file data. High capacity, not subtle.
+ * 2. LSB: Hides file data in the least significant bits of an existing carrier image. Low capacity, very subtle.
  */
 class ClientImageProcessor {
   static SIGNATURE = "SC";
+  static ENCODING_TYPE_GENERATED = 0;
+  static ENCODING_TYPE_LSB = 1;
+
   static MAX_FILE_SIZE = 1024 * 1024 * 1024; // 1GB
-  static BYTES_PER_PIXEL = 3; // Use only RGB channels, Alpha is always 255
+  static BYTES_PER_PIXEL_GENERATED = 3; // RGB
+  static BITS_PER_PIXEL_LSB = 3; // LSB of R, G, B
   static SHA256_SIZE = 32;
-  static CHUNK_SIZE = 1024 * 1024; // 1MB chunks for memory management
 
   /**
-   * Create a carrier image with hidden file data
-   * @param {File} file - The file to hide
-   * @param {string} password - Optional password for encryption
-   * @param {function} onProgress - Progress callback (0-100)
-   * @returns {Promise<Blob>} PNG blob containing the hidden data
+   * Hides a file inside an existing carrier image using LSB steganography.
+   * @param {File} payloadFile - The file to hide.
+   * @param {File} carrierImageFile - The image to hide the file in.
+   * @param {string|null} password - Optional password for encryption.
+   * @param {function|null} onProgress - Progress callback.
+   * @returns {Promise<Blob>} A new PNG blob with the hidden data.
    */
-  static async createCarrierImageAsync(file, password = null, onProgress = null) {
-    const fileData = await this.readFileAsArrayBuffer(file);
-    const fileName = file.name;
+  static async hideInExistingImageAsync(payloadFile, carrierImageFile, password = null, onProgress = null) {
+    onProgress?.(5);
+    const [payloadData, carrierImg] = await Promise.all([
+      this._readFileAsArrayBuffer(payloadFile),
+      this._loadImage(carrierImageFile),
+    ]);
+    onProgress?.(15);
+
+    const fileName = payloadFile.name;
     const isEncrypted = password != null;
 
-    if (fileData.byteLength > this.MAX_FILE_SIZE) {
-      throw new Error(`File too large. Maximum size is ${this.MAX_FILE_SIZE / (1024 * 1024)}MB.`);
-    }
-
-    onProgress?.(10);
-
-    // Compute SHA256 hash
-    const sha256Hash = await this.computeSHA256(fileData);
-    onProgress?.(20);
-
-    // Encrypt if password provided
-    let processedData = fileData;
+    // Process payload (hash, maybe encrypt)
+    const sha256Hash = await this._computeSHA256(payloadData);
+    let processedData = payloadData;
     if (isEncrypted) {
-      processedData = await this.encryptData(fileData, password);
-      onProgress?.(30);
+      processedData = await this._encryptData(payloadData, password);
     }
+    onProgress?.(30);
 
-    // Create header
-    const header = this.createHeader(processedData.byteLength, fileName, sha256Hash, isEncrypted);
-    console.log('Header created, length:', header.length, 'First 10 bytes:', header.slice(0, 10));
-    onProgress?.(40);
-
-    // Combine header and data
+    // Create header and combine with data
+    const header = this._createHeader(processedData.byteLength, fileName, sha256Hash, isEncrypted, this.ENCODING_TYPE_LSB);
     const totalData = new Uint8Array(header.length + processedData.byteLength);
     totalData.set(header, 0);
     totalData.set(new Uint8Array(processedData), header.length);
-    console.log('Total data length:', totalData.length, 'First 10 bytes:', totalData.slice(0, 10));
+    onProgress?.(40);
+
+    // Check if the carrier image has enough capacity
+    const carrierCapacity = Math.floor((carrierImg.width * carrierImg.height * this.BITS_PER_PIXEL_LSB) / 8);
+    if (totalData.length > carrierCapacity) {
+      throw new Error(`File is too large for the selected carrier image. Required: ${totalData.length} bytes, Available: ${carrierCapacity} bytes.`);
+    }
     onProgress?.(50);
 
-    // Calculate image dimensions
-    const pixelCount = Math.ceil(totalData.length / this.BYTES_PER_PIXEL);
-    const imageSize = Math.ceil(Math.sqrt(pixelCount));
-    console.log('Pixel count:', pixelCount, 'Image size:', imageSize, 'Total pixels needed:', imageSize * imageSize);
+    // Encode data into the carrier image
+    const canvas = document.createElement('canvas');
+    canvas.width = carrierImg.width;
+    canvas.height = carrierImg.height;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(carrierImg, 0, 0);
+    const imageData = ctx.getImageData(0, 0, carrierImg.width, carrierImg.height);
     onProgress?.(60);
 
-    // Create canvas and encode data
-    const canvas = document.createElement('canvas');
-    canvas.width = imageSize;
-    canvas.height = imageSize;
-    const ctx = canvas.getContext('2d');
+    this._writeBitsToImageData(imageData.data, totalData);
+    onProgress?.(80);
 
-
-    // Fill with opaque white background (alpha = 255)
-    ctx.fillStyle = 'white';
-    ctx.fillRect(0, 0, imageSize, imageSize);
-
-    // Encode data into pixels
-    const imageData = ctx.getImageData(0, 0, imageSize, imageSize);
-    this.writeBytesToImageData(imageData.data, totalData);
     ctx.putImageData(imageData, 0, 0);
-
-    // --- DEBUGGING LOG: After putImageData on encoding canvas ---
-    const writtenImageData = ctx.getImageData(0, 0, imageSize, imageSize);
-    console.log('DEBUG (Encoding): Raw imageData after putImageData (first 16 bytes):', writtenImageData.data.slice(0, 16));
-    // --- END DEBUGGING LOG ---
-
     onProgress?.(90);
 
-    // Convert to PNG blob
     return new Promise((resolve) => {
       canvas.toBlob((blob) => {
         onProgress?.(100);
@@ -89,120 +79,266 @@ class ClientImageProcessor {
   }
 
   /**
-   * Extract file from carrier image
-   * @param {File} imageFile - PNG file containing hidden data
-   * @param {string} password - Optional password for decryption
-   * @param {function} onProgress - Progress callback (0-100)
-   * @returns {Promise<{fileName: string, data: Uint8Array}>}
+   * Creates a new carrier image from the file data (original method).
+   * @param {File} file - The file to hide.
+   * @param {string|null} password - Optional password for encryption.
+   * @param {function|null} onProgress - Progress callback.
+   * @returns {Promise<Blob>} PNG blob containing the hidden data.
    */
-  static async extractFileAsync(imageFile, password = null, onProgress = null) {
-    const img = new Image();
+  static async createCarrierImageAsync(file, password = null, onProgress = null) {
+    const fileData = await this._readFileAsArrayBuffer(file);
+    if (fileData.byteLength > this.MAX_FILE_SIZE) throw new Error('File too large.');
+    onProgress?.(10);
+
+    const sha256Hash = await this._computeSHA256(fileData);
+    onProgress?.(20);
+
+    let processedData = fileData;
+    if (password) {
+      processedData = await this._encryptData(fileData, password);
+      onProgress?.(30);
+    }
+
+    const header = this._createHeader(processedData.byteLength, file.name, sha256Hash, !!password, this.ENCODING_TYPE_GENERATED);
+    onProgress?.(40);
+
+    const totalData = new Uint8Array(header.length + processedData.byteLength);
+    totalData.set(header, 0);
+    totalData.set(new Uint8Array(processedData), header.length);
+    onProgress?.(50);
+
+    const pixelCount = Math.ceil(totalData.length / this.BYTES_PER_PIXEL_GENERATED);
+    const imageSize = Math.ceil(Math.sqrt(pixelCount));
+    onProgress?.(60);
+
     const canvas = document.createElement('canvas');
+    canvas.width = imageSize;
+    canvas.height = imageSize;
     const ctx = canvas.getContext('2d');
+    ctx.fillStyle = 'white';
+    ctx.fillRect(0, 0, imageSize, imageSize);
 
-    return new Promise((resolve, reject) => {
-      img.onload = async () => {
-        canvas.width = img.width;
-        canvas.height = img.height;
-        ctx.drawImage(img, 0, 0);
+    const imageData = ctx.getImageData(0, 0, imageSize, imageSize);
+    this._writeBytesDirectly(imageData.data, totalData);
+    ctx.putImageData(imageData, 0, 0);
+    onProgress?.(90);
 
-        try {
-          const imageData = ctx.getImageData(0, 0, img.width, img.height);
-          const pixelData = imageData.data;
-
-          onProgress?.(20);
-
-          // Read header
-          const headerInfo = this.readHeader(pixelData);
-          console.log('Header info:', headerInfo);
-          onProgress?.(40);
-
-          // Read file data from image
-          const fileDataFromImage = this.readFileData(pixelData, headerInfo.totalHeaderSize, headerInfo.fileSize);
-          console.log('File data length:', fileDataFromImage.length, 'Expected:', headerInfo.fileSize);
-          onProgress?.(60);
-
-          // Decrypt if needed
-          let finalData = fileDataFromImage;
-          if (headerInfo.isEncrypted) {
-            if (!password) {
-              throw new Error('File is encrypted, but no password was provided.');
-            }
-            try {
-              finalData = await this.decryptData(fileDataFromImage, password);
-            } catch (e) {
-              // This catch block is crucial. It catches errors from crypto.subtle.decrypt,
-              // which almost always means the password was wrong.
-              throw new Error('Decryption failed. The password may be incorrect.');
-            }
-          }
-          onProgress?.(80);
-
-          // Verify hash on the plaintext data
-          const computedHash = await this.computeSHA256(finalData);
-          if (!this.arraysEqual(computedHash, headerInfo.sha256Hash)) {
-            // If decryption succeeded but the hash is wrong, the file is corrupt.
-            throw new Error('SHA256 hash mismatch. The file is likely corrupted.');
-          }
-          
-          onProgress?.(100);
-          resolve({
-            fileName: headerInfo.fileName,
-            data: finalData
-          });
-        } catch (error) {
-          reject(error);
-        }
-      };
-
-      img.onerror = () => reject(new Error('Failed to load image'));
-      img.src = URL.createObjectURL(imageFile);
+    return new Promise((resolve) => {
+      canvas.toBlob((blob) => {
+        onProgress?.(100);
+        resolve(blob);
+      }, 'image/png');
     });
   }
 
   /**
-   * Extract metadata from carrier image without file data
-   * @param {File} imageFile - PNG file
-   * @returns {Promise<Object>} Metadata object
+   * Extracts a file from any supported carrier image.
+   * @param {File} imageFile - PNG file with hidden data.
+   * @param {string|null} password - Optional password.
+   * @param {function|null} onProgress - Progress callback.
+   * @returns {Promise<{fileName: string, data: Uint8Array}>}
    */
-  static async extractMetadataAsync(imageFile) {
-    const img = new Image();
+  static async extractFileAsync(imageFile, password = null, onProgress = null) {
+    const img = await this._loadImage(imageFile);
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
+    canvas.width = img.width;
+    canvas.height = img.height;
+    ctx.drawImage(img, 0, 0);
 
-    return new Promise((resolve, reject) => {
-      img.onload = () => {
-        console.log('Loaded image dimensions:', img.width, 'x', img.height);
-        canvas.width = img.width;
-        canvas.height = img.height;
-        ctx.drawImage(img, 0, 0);
+    try {
+      const imageData = ctx.getImageData(0, 0, img.width, img.height);
+      const pixelData = imageData.data;
+      onProgress?.(20);
 
+      const headerInfo = this._readHeader(pixelData);
+      onProgress?.(40);
+
+      let fileDataFromImage;
+      if (headerInfo.encodingType === this.ENCODING_TYPE_LSB) {
+        fileDataFromImage = this._readBitsFromPixelData(pixelData, headerInfo.totalHeaderSize, headerInfo.fileSize);
+      } else {
+        fileDataFromImage = this._readBytesDirectly(pixelData, headerInfo.totalHeaderSize, headerInfo.fileSize);
+      }
+      onProgress?.(60);
+
+      let finalData = fileDataFromImage;
+      if (headerInfo.isEncrypted) {
+        if (!password) throw new Error('File is encrypted, but no password was provided.');
         try {
-          const imageData = ctx.getImageData(0, 0, img.width, img.height);
-          const pixelData = imageData.data;
-          console.log('Canvas imageData length:', pixelData.length, 'first 16 bytes:', pixelData.slice(0, 16));
-
-          const headerInfo = this.readHeader(pixelData);
-
-          resolve({
-            signature: headerInfo.signature,
-            fileSize: headerInfo.fileSize,
-            fileName: headerInfo.fileName,
-            sha256: Array.from(headerInfo.sha256Hash).map(b => b.toString(16).padStart(2, '0')).join(''),
-            isEncrypted: headerInfo.isEncrypted
-          });
-        } catch (error) {
-          reject(error);
+          finalData = await this._decryptData(fileDataFromImage, password);
+        } catch (e) {
+          throw new Error('Decryption failed. The password may be incorrect.');
         }
-      };
+      }
+      onProgress?.(80);
 
-      img.onerror = () => reject(new Error('Failed to load image'));
-      img.src = URL.createObjectURL(imageFile);
-    });
+      const computedHash = await this._computeSHA256(finalData);
+      if (!this._arraysEqual(computedHash, headerInfo.sha256Hash)) {
+        throw new Error('SHA256 hash mismatch. The file is likely corrupted.');
+      }
+      
+      onProgress?.(100);
+      return { fileName: headerInfo.fileName, data: finalData };
+    } catch (error) {
+      throw error;
+    }
   }
 
-  // Helper methods
-  static async readFileAsArrayBuffer(file) {
+  /**
+   * Extracts metadata from a carrier image.
+   * @param {File} imageFile - PNG file.
+   * @returns {Promise<Object>} Metadata object.
+   */
+  static async extractMetadataAsync(imageFile) {
+    const img = await this._loadImage(imageFile);
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    canvas.width = img.width;
+    canvas.height = img.height;
+    ctx.drawImage(img, 0, 0);
+    const pixelData = ctx.getImageData(0, 0, img.width, img.height).data;
+    return this._readHeader(pixelData);
+  }
+
+  // --- INTERNAL HELPERS ---
+
+  // Header Management
+  static _createHeader(fileSize, fileName, sha256Hash, isEncrypted, encodingType) {
+    const fileNameBytes = new TextEncoder().encode(fileName);
+    if (fileNameBytes.length > 255) throw new Error('Filename too long');
+
+    const header = new Uint8Array(512); // Allocate a generous fixed-size buffer
+    let offset = 0;
+
+    // Signature (2 bytes)
+    header.set(new TextEncoder().encode(this.SIGNATURE), offset);
+    offset += 2;
+
+    // Encoding Type (1 byte)
+    header[offset++] = encodingType;
+
+    // File size (8 bytes, little-endian)
+    const sizeView = new DataView(new ArrayBuffer(8));
+    // eslint-disable-next-line no-undef
+    sizeView.setBigUint64(0, BigInt(fileSize), true);
+    header.set(new Uint8Array(sizeView.buffer), offset);
+    offset += 8;
+
+    // Filename length (1 byte)
+    header[offset++] = fileNameBytes.length;
+
+    // Filename (up to 255 bytes)
+    header.set(fileNameBytes, offset);
+    offset += fileNameBytes.length;
+
+    // IsEncrypted (1 byte)
+    header[offset++] = isEncrypted ? 1 : 0;
+
+    // SHA256 hash (32 bytes)
+    header.set(sha256Hash, offset);
+    offset += this.SHA256_SIZE;
+
+    // Return only the portion of the buffer that was used
+    return header.slice(0, offset);
+  }
+
+  static _readHeader(pixelData) {
+    // The header itself is small, so we can read it using the appropriate method
+    // We assume the header is always written directly for simplicity, even in LSB mode.
+    const headerSignature = this._readBytesDirectly(pixelData, 0, 3);
+    const signature = String.fromCharCode(headerSignature[0], headerSignature[1]);
+    if (signature !== this.SIGNATURE) throw new Error('Invalid signature. Not a valid carrier image.');
+    
+    const encodingType = headerSignature[2];
+    let readFunc = (encodingType === this.ENCODING_TYPE_LSB) 
+      ? (offset, len) => this._readBitsFromPixelData(pixelData, offset, len)
+      : (offset, len) => this._readBytesDirectly(pixelData, offset, len);
+
+    let offset = 3;
+    const fileSizeData = readFunc(offset, 8);
+    // eslint-disable-next-line no-undef
+    const fileSize = new DataView(fileSizeData.buffer).getBigUint64(0, true);
+    offset += 8;
+
+    const fileNameLengthData = readFunc(offset, 1);
+    const fileNameLength = fileNameLengthData[0];
+    offset += 1;
+
+    const fileNameBytes = readFunc(offset, fileNameLength);
+    const fileName = new TextDecoder().decode(fileNameBytes);
+    offset += fileNameLength;
+
+    const isEncryptedData = readFunc(offset, 1);
+    const isEncrypted = isEncryptedData[0] === 1;
+    offset += 1;
+
+    const sha256Hash = readFunc(offset, this.SHA256_SIZE);
+    offset += this.SHA256_SIZE;
+
+    return {
+      signature,
+      encodingType,
+      fileSize: Number(fileSize),
+      fileName,
+      isEncrypted,
+      sha256Hash,
+      totalHeaderSize: offset
+    };
+  }
+
+  // Data I/O: Direct (Generated Mode)
+  static _writeBytesDirectly(imageData, bytes) {
+    let byteIndex = 0;
+    for (let i = 0; i < imageData.length && byteIndex < bytes.length; i += 4) {
+      imageData[i] = bytes[byteIndex++];
+      if (byteIndex < bytes.length) imageData[i + 1] = bytes[byteIndex++];
+      if (byteIndex < bytes.length) imageData[i + 2] = bytes[byteIndex++];
+    }
+  }
+
+  static _readBytesDirectly(pixelData, startOffset, length) {
+    const bytes = new Uint8Array(length);
+    for (let i = 0; i < length; i++) {
+      const dataBytePosition = startOffset + i;
+      const pixel = Math.floor(dataBytePosition / 3);
+      const channel = dataBytePosition % 3;
+      bytes[i] = pixelData[pixel * 4 + channel];
+    }
+    return bytes;
+  }
+
+  // Data I/O: LSB (Subtle Mode)
+  static _writeBitsToImageData(imageData, bytes) {
+    let bitIndex = 0;
+    for (const byte of bytes) {
+      for (let i = 0; i < 8; i++) {
+        const bit = (byte >> (7 - i)) & 1;
+        const channelIndex = bitIndex * 4 + (bitIndex % 3);
+        imageData[channelIndex] = (imageData[channelIndex] & 0xFE) | bit;
+        bitIndex++;
+      }
+    }
+  }
+
+  static _readBitsFromPixelData(pixelData, startOffset, length) {
+    const bytes = new Uint8Array(length);
+    let bitIndex = startOffset * 8;
+    for (let i = 0; i < length; i++) {
+      let currentByte = 0;
+      for (let j = 0; j < 8; j++) {
+        const channelIndex = bitIndex * 4 + (bitIndex % 3);
+        const bit = pixelData[channelIndex] & 1;
+        currentByte = (currentByte << 1) | bit;
+        bitIndex++;
+      }
+      bytes[i] = currentByte;
+    }
+    return bytes;
+  }
+
+  // Crypto & File Helpers
+  static async _readFileAsArrayBuffer(file) {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => resolve(reader.result);
@@ -211,187 +347,42 @@ class ClientImageProcessor {
     });
   }
 
-  static async computeSHA256(data) {
+  static async _loadImage(imageFile) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error('Failed to load image file.'));
+      img.src = URL.createObjectURL(imageFile);
+    });
+  }
+
+  static async _computeSHA256(data) {
     const hashBuffer = await crypto.subtle.digest('SHA-256', data);
     return new Uint8Array(hashBuffer);
   }
 
-  static createHeader(fileSize, fileName, sha256Hash, isEncrypted) {
-    const fileNameBytes = new TextEncoder().encode(fileName);
-    if (fileNameBytes.length > 255) {
-      throw new Error('Filename too long');
-    }
-
-    // This header structure must be byte-for-byte identical to the C# server-side implementation
-    const baseHeaderSize = 2 + 8 + 4; // signature + fileSize + fileNameLength
-    const isEncryptedByte = new Uint8Array([isEncrypted ? 1 : 0]);
-    const currentSize = baseHeaderSize + fileNameBytes.length + 1; // +1 for isEncrypted
-    
-    // The C# code aligns the SHA hash to a 4-byte boundary. We must do the same.
-    const padding = (4 - (currentSize % 4)) % 4;
-    const totalHeaderSize = currentSize + padding + this.SHA256_SIZE;
-
-    const header = new Uint8Array(totalHeaderSize);
-    let offset = 0;
-
-    // Signature
-    header.set(new TextEncoder().encode(this.SIGNATURE), offset);
-    offset += 2;
-
-    // File size (long -> 8 bytes, little-endian)
-    const sizeView = new DataView(new ArrayBuffer(8));
-    // eslint-disable-next-line no-undef
-    sizeView.setBigUint64(0, BigInt(fileSize), true);
-    header.set(new Uint8Array(sizeView.buffer), offset);
-    offset += 8;
-
-    // Filename length (int -> 4 bytes, little-endian)
-    const nameLenView = new DataView(new ArrayBuffer(4));
-    nameLenView.setUint32(0, fileNameBytes.length, true);
-    header.set(new Uint8Array(nameLenView.buffer), offset);
-    offset += 4;
-
-    // Filename
-    header.set(fileNameBytes, offset);
-    offset += fileNameBytes.length;
-
-    // IsEncrypted
-    header.set(isEncryptedByte, offset);
-    offset += 1;
-
-    // Padding (zero-filled by default)
-    offset += padding;
-
-    // SHA256 hash
-    header.set(sha256Hash, offset);
-
-    return header;
-  }
-
-  static readHeader(pixelData) {
-    // Read signature (first 2 bytes)
-    const signatureBytes = this.readBytesFromPixelData(pixelData, 0, 2);
-    const signature = String.fromCharCode(signatureBytes[0], signatureBytes[1]);
-    console.log('Signature bytes read:', signatureBytes, 'as chars:', signature);
-
-    if (signature !== this.SIGNATURE) {
-      throw new Error(`Invalid signature '${signature}'. This is not a ShadeOfColor2 encoded image.`);
-    }
-
-    // Read file size (8 bytes starting at offset 2)
-    const fileSizeBytes = this.readBytesFromPixelData(pixelData, 2, 8);
-    const fileSize = new DataView(fileSizeBytes.buffer).getBigUint64(0, true);
-
-    // Read filename length (4 bytes starting at offset 10)
-    const fileNameLengthBytes = this.readBytesFromPixelData(pixelData, 10, 4);
-    const fileNameLength = new DataView(fileNameLengthBytes.buffer).getUint32(0, true);
-
-    // Read filename
-    const fileNameBytes = this.readBytesFromPixelData(pixelData, 14, fileNameLength);
-    const fileName = new TextDecoder().decode(fileNameBytes);
-
-    // Read isEncrypted (1 byte)
-    const isEncryptedBytes = this.readBytesFromPixelData(pixelData, 14 + fileNameLength, 1);
-    const isEncrypted = isEncryptedBytes[0] === 1;
-
-    // Calculate SHA256 offset
-    const headerWithoutHash = 2 + 8 + 4 + fileNameLength + 1;
-    const sha256Offset = headerWithoutHash + (4 - (headerWithoutHash % 4)) % 4;
-
-    // Read SHA256 hash
-    const sha256Hash = this.readBytesFromPixelData(pixelData, sha256Offset, this.SHA256_SIZE);
-
-    return {
-      signature,
-      fileSize: Number(fileSize),
-      fileName,
-      isEncrypted,
-      sha256Hash,
-      totalHeaderSize: sha256Offset + this.SHA256_SIZE
-    };
-  }
-
-  static readBytesFromPixelData(pixelData, startIndex, length) {
-    const bytes = new Uint8Array(length);
-    for (let i = 0; i < length; i++) {
-        const dataBytePosition = startIndex + i;
-        const pixel = Math.floor(dataBytePosition / 3);
-        const channel = dataBytePosition % 3;
-        const arrayIndex = pixel * 4 + channel;
-        if (arrayIndex < pixelData.length) {
-            bytes[i] = pixelData[arrayIndex];
-        }
-    }
-    return bytes;
-  }
-
-  static readFileData(pixelData, startOffset, fileSize) {
-    return this.readBytesFromPixelData(pixelData, startOffset, fileSize);
-  }
-
-  static writeBytesToImageData(imageData, bytes) {
-    console.log('Writing bytes to imageData, first 10 bytes:', bytes.slice(0, 10));
-    let byteIndex = 0;
-    for (let i = 0; i < imageData.length && byteIndex < bytes.length; i += 4) {
-        imageData[i] = bytes[byteIndex++];
-        if (byteIndex < bytes.length) {
-            imageData[i + 1] = bytes[byteIndex++];
-        }
-        if (byteIndex < bytes.length) {
-            imageData[i + 2] = bytes[byteIndex++];
-        }
-        // The alpha channel (i + 3) is left untouched (it's 255 from the initial fill)
-    }
-    console.log('After writing, imageData first 16 bytes:', imageData.slice(0, 16));
-  }
-
-  static async encryptData(data, password) {
-    const key = await this.deriveKey(password);
+  static async _encryptData(data, password) {
+    const key = await this._deriveKey(password);
     const iv = crypto.getRandomValues(new Uint8Array(16));
-
-    const encrypted = await crypto.subtle.encrypt(
-      { name: 'AES-CBC', iv },
-      key,
-      data
-    );
-
-    // Prepend IV
+    const encrypted = await crypto.subtle.encrypt({ name: 'AES-CBC', iv }, key, data);
     const result = new Uint8Array(iv.length + encrypted.byteLength);
     result.set(iv, 0);
     result.set(new Uint8Array(encrypted), iv.length);
     return result;
   }
 
-  static async decryptData(data, password) {
-    const key = await this.deriveKey(password);
+  static async _decryptData(data, password) {
+    const key = await this._deriveKey(password);
     const iv = data.slice(0, 16);
     const encryptedData = data.slice(16);
-
-    const decrypted = await crypto.subtle.decrypt(
-      { name: 'AES-CBC', iv },
-      key,
-      encryptedData
-    );
-
+    const decrypted = await crypto.subtle.decrypt({ name: 'AES-CBC', iv }, key, encryptedData);
     return new Uint8Array(decrypted);
   }
 
-  static async deriveKey(password) {
-    const keyMaterial = await crypto.subtle.importKey(
-      'raw',
-      new TextEncoder().encode(password),
-      'PBKDF2',
-      false,
-      ['deriveKey']
-    );
-
+  static async _deriveKey(password) {
+    const keyMaterial = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveKey']);
     return crypto.subtle.deriveKey(
-      {
-        name: 'PBKDF2',
-        salt: new Uint8Array(16), // Fixed salt for compatibility
-        iterations: 10000,
-        hash: 'SHA-256'
-      },
+      { name: 'PBKDF2', salt: new Uint8Array(16), iterations: 10000, hash: 'SHA-256' },
       keyMaterial,
       { name: 'AES-CBC', length: 256 },
       false,
@@ -399,7 +390,7 @@ class ClientImageProcessor {
     );
   }
 
-  static arraysEqual(a, b) {
+  static _arraysEqual(a, b) {
     if (a.length !== b.length) return false;
     return a.every((val, index) => val === b[index]);
   }
