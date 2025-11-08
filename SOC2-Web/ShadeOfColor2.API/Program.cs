@@ -10,6 +10,34 @@ builder.Services.AddSingleton<IImageProcessor, ImageProcessor>();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddAntiforgery();
 
+// Add rate limiting
+builder.Services.AddRateLimiter(options =>
+{
+    options.AddFixedWindowLimiter("hide", limiterOptions =>
+    {
+        limiterOptions.PermitLimit = 10;
+        limiterOptions.Window = TimeSpan.FromMinutes(1);
+        limiterOptions.QueueProcessingOrder = System.Threading.RateLimiting.QueueProcessingOrder.OldestFirst;
+        limiterOptions.QueueLimit = 0;
+    });
+    
+    options.AddFixedWindowLimiter("extract", limiterOptions =>
+    {
+        limiterOptions.PermitLimit = 15;
+        limiterOptions.Window = TimeSpan.FromMinutes(1);
+        limiterOptions.QueueProcessingOrder = System.Threading.RateLimiting.QueueProcessingOrder.OldestFirst;
+        limiterOptions.QueueLimit = 0;
+    });
+    
+    options.AddFixedWindowLimiter("health", limiterOptions =>
+    {
+        limiterOptions.PermitLimit = 100;
+        limiterOptions.Window = TimeSpan.FromMinutes(1);
+        limiterOptions.QueueProcessingOrder = System.Threading.RateLimiting.QueueProcessingOrder.OldestFirst;
+        limiterOptions.QueueLimit = 0;
+    });
+});
+
 // Add CORS for frontend
 builder.Services.AddCors(options =>
 {
@@ -38,6 +66,7 @@ var app = builder.Build();
 
 // Use the fallback CORS policy (allow all origins)
 app.UseCors("AllowAll");
+app.UseRateLimiter();
 app.UseAntiforgery();
 
 // Health check
@@ -45,7 +74,8 @@ app.MapGet("/", () =>
 {
     Console.WriteLine($"[{DateTime.UtcNow}] Health check accessed");
     return Results.Ok(new { status = "ShadeOfColor2 API is running" });
-});
+})
+.RequireRateLimiting("health");
 
 // Encode endpoint - hide file in image
 app.MapPost("/api/hide", async (IFormFile file, IImageProcessor processor) =>
@@ -86,6 +116,7 @@ app.MapPost("/api/hide", async (IFormFile file, IImageProcessor processor) =>
     }
 })
 .DisableAntiforgery()
+.RequireRateLimiting("hide")
 .Produces(200, contentType: "image/png")
 .Produces(400);
 
@@ -127,6 +158,7 @@ app.MapPost("/api/extract", async (HttpContext context, IFormFile image, IImageP
     }
 })
 .DisableAntiforgery()
+.RequireRateLimiting("extract")
 .Produces(200, contentType: "application/octet-stream")
 .Produces(400);
 
