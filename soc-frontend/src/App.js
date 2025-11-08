@@ -131,24 +131,43 @@ function App() {
       });
     } catch (error) {
       setProgress(100);
-      let errorMessage = error.message;
+      console.error('Process error:', error);
+      let errorMessage = 'An unexpected error occurred';
 
-      if (error.response?.data) {
-        if (error.response.data instanceof Blob) {
-          try {
-            const text = await error.response.data.text();
-            const parsed = JSON.parse(text);
-            errorMessage = parsed.error || parsed.message || text;
-          } catch {
-            errorMessage = await error.response.data.text();
+      try {
+        if (error.response) {
+          console.log('Error response:', error.response);
+          const status = error.response.status;
+          errorMessage = `Server error (${status})`;
+
+          if (error.response.data) {
+            if (error.response.data instanceof Blob) {
+              const text = await error.response.data.text();
+              console.log('Error response text:', text);
+              try {
+                const parsed = JSON.parse(text);
+                errorMessage = parsed.error || parsed.message || text;
+              } catch (parseError) {
+                errorMessage = text || errorMessage;
+              }
+            } else if (typeof error.response.data === 'object') {
+              errorMessage = error.response.data.error || error.response.data.message || JSON.stringify(error.response.data);
+            } else if (typeof error.response.data === 'string') {
+              errorMessage = error.response.data;
+            }
           }
-        } else if (typeof error.response.data === 'object') {
-          errorMessage = error.response.data.error || error.response.data.message || JSON.stringify(error.response.data);
+        } else if (error.request) {
+          console.log('Error request:', error.request);
+          errorMessage = 'Network error - unable to reach server';
         } else {
-          errorMessage = error.response.data;
+          errorMessage = error.message || 'Unknown error';
         }
+      } catch (parseError) {
+        console.error('Error parsing error response:', parseError);
+        errorMessage = 'Failed to parse error response';
       }
 
+      console.log('Final error message:', errorMessage);
       setResult({
         success: false,
         message: errorMessage
