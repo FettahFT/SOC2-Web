@@ -237,6 +237,7 @@ class ClientImageProcessor {
 
     // File size (long -> 8 bytes, little-endian)
     const sizeView = new DataView(new ArrayBuffer(8));
+    // eslint-disable-next-line no-undef
     sizeView.setBigUint64(0, BigInt(fileSize), true);
     header.set(new Uint8Array(sizeView.buffer), offset);
     offset += 8;
