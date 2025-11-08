@@ -2,7 +2,7 @@
 
 A purely client-side web application for hiding files inside PNG images using steganography. This project is a web-based user interface for the concepts demonstrated in the original [ShadeOfColor2 C# application by @archistico](https://github.com/archistico/ShadeOfColor2).
 
-**[➡️ Go to the Live Web App Here! ⬅️]** *(<- Add your Vercel deployment link here!)*
+https://soc-2-web.vercel.app/
 
 ---
 
