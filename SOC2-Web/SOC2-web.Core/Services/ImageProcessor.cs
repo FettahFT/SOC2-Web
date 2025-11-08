@@ -218,6 +218,22 @@ public class ImageProcessor : IImageProcessor
                 }
             }
                 
+            // Validate image format first
+            try
+            {
+                var format = await Image.DetectFormatAsync(imageStream, cancellationToken);
+                if (format == null)
+                    throw new InvalidDataException("Unable to detect image format. Please ensure you're uploading a valid image file.");
+                    
+                // Reset stream position after format detection
+                if (imageStream.CanSeek)
+                    imageStream.Position = 0;
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidDataException($"Invalid image format: {ex.Message}");
+            }
+            
             // Load image
             image = await Image.LoadAsync<Rgba32>(imageStream, cancellationToken);
         
@@ -303,36 +319,11 @@ public class ImageProcessor : IImageProcessor
         var result = new byte[length];
         var processedBytes = 0;
         
-        // Use parallel processing for large files
-        if (length > 10 * 1024 * 1024) // 10MB+
+        // Disable parallel processing temporarily to avoid data corruption
+        // TODO: Re-enable after fixing thread safety issues
+        if (false) // length > 10 * 1024 * 1024) // 10MB+
         {
-            var numChunks = (int)Math.Ceiling((double)length / chunkSize);
-            var tasks = new Task[Math.Min(numChunks, Environment.ProcessorCount)];
-            var chunkIndex = 0;
-            
-            for (int i = 0; i < tasks.Length; i++)
-            {
-                var taskIndex = i;
-                tasks[i] = Task.Run(() =>
-                {
-                    while (true)
-                    {
-                        var currentChunk = Interlocked.Increment(ref chunkIndex) - 1;
-                        if (currentChunk >= numChunks) break;
-                        
-                        var offset = currentChunk * chunkSize;
-                        var size = Math.Min(chunkSize, length - offset);
-                        
-                        if (cancellationToken.IsCancellationRequested)
-                            break;
-                            
-                        var chunk = ReadBytesFromImage(image, startIndex + offset, size);
-                        Array.Copy(chunk, 0, result, offset, size);
-                    }
-                }, cancellationToken);
-            }
-            
-            await Task.WhenAll(tasks);
+            // Parallel processing code disabled
         }
         else
         {
@@ -350,7 +341,8 @@ public class ImageProcessor : IImageProcessor
                 // Check cancellation more frequently
                 cancellationToken.ThrowIfCancellationRequested();
                 
-                if (processedBytes % (2 * 1024 * 1024) == 0) // Every 2MB
+                // Yield less frequently to improve performance
+                if (processedBytes % (4 * 1024 * 1024) == 0) // Every 4MB
                     await Task.Yield();
             }
         }
