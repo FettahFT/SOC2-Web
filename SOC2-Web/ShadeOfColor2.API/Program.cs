@@ -201,19 +201,11 @@ app.MapPost("/api/hide", async (IFormFile file, IImageProcessor processor, Cance
         
         Console.WriteLine($"[{DateTime.UtcNow}] Returning PNG file: {randomName}, size: {imageBytes.Length} bytes");
         
-        var response = Results.File(
+        return Results.File(
             imageBytes,
             "image/png",
             randomName
         );
-        
-        // Force memory cleanup
-        encodedImage?.Dispose();
-        Array.Clear(imageBytes, 0, imageBytes.Length);
-        GC.Collect();
-        GC.WaitForPendingFinalizers();
-        
-        return response;
     }
     catch (ArgumentException ex)
     {
@@ -233,8 +225,11 @@ app.MapPost("/api/hide", async (IFormFile file, IImageProcessor processor, Cance
     }
     finally
     {
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        
         var endTime = DateTime.UtcNow;
-        var finalMemory = GC.GetTotalMemory(true);
+        var finalMemory = GC.GetTotalMemory(false);
         var duration = endTime - startTime;
         Console.WriteLine($"[{endTime}] Hide endpoint completed - Duration: {duration.TotalSeconds:F2}s, Final Memory: {finalMemory / 1024 / 1024}MB, Memory Delta: {(finalMemory - initialMemory) / 1024 / 1024}MB");
     }
@@ -285,22 +280,12 @@ app.MapPost("/api/extract", async (HttpContext context, IFormFile image, IImageP
         // Add custom header for reliable filename extraction
         context.Response.Headers["X-Original-Filename"] = originalFileName;
         
-        // Create response and clear extracted data from memory immediately
-        var responseData = extractedFile.Data.ToArray(); // Create copy for response
-        var response = Results.File(
-            responseData,
+        // Create response
+        return Results.File(
+            extractedFile.Data,
             "application/octet-stream",
             originalFileName
         );
-        
-        // Clear the data arrays to free memory immediately
-        Array.Clear(extractedFile.Data, 0, extractedFile.Data.Length);
-        
-        // Force memory cleanup
-        GC.Collect();
-        GC.WaitForPendingFinalizers();
-        
-        return response;
     }
     catch (InvalidDataException ex)
     {
@@ -326,8 +311,11 @@ app.MapPost("/api/extract", async (HttpContext context, IFormFile image, IImageP
     }
     finally
     {
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        
         var endTime = DateTime.UtcNow;
-        var finalMemory = GC.GetTotalMemory(true);
+        var finalMemory = GC.GetTotalMemory(false);
         var duration = endTime - startTime;
         Console.WriteLine($"[{endTime}] Extract endpoint completed - Duration: {duration.TotalSeconds:F2}s, Final Memory: {finalMemory / 1024 / 1024}MB, Memory Delta: {(finalMemory - initialMemory) / 1024 / 1024}MB");
     }
