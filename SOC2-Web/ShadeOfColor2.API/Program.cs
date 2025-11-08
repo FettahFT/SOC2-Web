@@ -29,7 +29,8 @@ builder.Services.AddCors(options =>
     {
         policy.AllowAnyOrigin()
               .AllowAnyHeader()
-              .AllowAnyMethod();
+              .AllowAnyMethod()
+              .WithExposedHeaders("X-Original-Filename");
     });
 });
 
@@ -89,7 +90,7 @@ app.MapPost("/api/hide", async (IFormFile file, IImageProcessor processor) =>
 .Produces(400);
 
 // Decode endpoint - extract file from image
-app.MapPost("/api/extract", async (IFormFile image, IImageProcessor processor) =>
+app.MapPost("/api/extract", async (HttpContext context, IFormFile image, IImageProcessor processor) =>
 {
     Console.WriteLine($"[{DateTime.UtcNow}] Extract endpoint accessed - Image: {image?.FileName}");
     
@@ -107,9 +108,12 @@ app.MapPost("/api/extract", async (IFormFile image, IImageProcessor processor) =
         var originalFileName = extractedFile.FileName;
         Console.WriteLine($"[{DateTime.UtcNow}] Extracted file: {originalFileName}");
         
+        // Add custom header for reliable filename extraction
+        context.Response.Headers.Add("X-Original-Filename", originalFileName);
+        
         return Results.File(
-            extractedFile.Data, 
-            "application/octet-stream", 
+            extractedFile.Data,
+            "application/octet-stream",
             originalFileName
         );
     }

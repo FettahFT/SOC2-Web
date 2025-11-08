@@ -96,7 +96,7 @@ function App() {
       
       const filename = mode === 'crypt' 
         ? `image_${Math.random().toString(36).substring(2, 10)}.png`
-        : response.headers['content-disposition']?.split('filename=')[1]?.replace(/"/g, '') || 'extracted_file';
+        : response.headers['x-original-filename'] || 'extracted_file';
       
       link.setAttribute('download', filename);
       document.body.appendChild(link);
