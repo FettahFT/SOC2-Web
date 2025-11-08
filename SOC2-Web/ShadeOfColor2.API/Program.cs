@@ -6,7 +6,9 @@ using SixLabors.ImageSharp.Formats.Png;
 var builder = WebApplication.CreateBuilder(args);
 
 // Register services
-builder.Services.AddSingleton<IImageProcessor, ImageProcessor>();
+builder.Services.AddSingleton<StreamingConfiguration>(new StreamingConfiguration());
+builder.Services.AddSingleton<IImageProcessor, ResilientImageProcessor>();
+builder.Services.AddLogging();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddAntiforgery();
 
@@ -67,6 +69,31 @@ var app = builder.Build();
 // Use the fallback CORS policy (allow all origins)
 app.UseCors("AllowAll");
 app.UseRateLimiter();
+
+// Global error handling for streaming
+app.Use(async (context, next) =>
+{
+    try
+    {
+        await next();
+    }
+    catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
+    {
+        context.Response.StatusCode = 499; // Client closed request
+    }
+    catch (TimeoutException)
+    {
+        context.Response.StatusCode = 408; // Request timeout
+        await context.Response.WriteAsync("Request timeout during file processing");
+    }
+    catch (OutOfMemoryException)
+    {
+        MemoryMonitor.ForceCleanup();
+        context.Response.StatusCode = 507; // Insufficient storage
+        await context.Response.WriteAsync("Insufficient memory to process file");
+    }
+});
+
 app.UseAntiforgery();
 
 // Health check
@@ -74,6 +101,48 @@ app.MapGet("/", () =>
 {
     Console.WriteLine($"[{DateTime.UtcNow}] Health check accessed");
     return Results.Ok(new { status = "ShadeOfColor2 API is running" });
+})
+.RequireRateLimiting("health");
+
+// Streaming health check
+app.MapGet("/health/streaming", () =>
+{
+    var metrics = StreamingMetrics.GetMetrics();
+    var memoryUsage = MemoryMonitor.GetCurrentMemoryUsage();
+    var isMemoryHigh = MemoryMonitor.IsMemoryPressureHigh();
+    
+    return Results.Ok(new 
+    {
+        status = "healthy",
+        streaming = new
+        {
+            requests = metrics.Streaming,
+            fallbacks = metrics.Fallback,
+            errors = metrics.Errors,
+            successRate = metrics.Streaming > 0 ? (double)(metrics.Streaming - metrics.Errors) / metrics.Streaming : 1.0
+        },
+        memory = new
+        {
+            currentBytes = memoryUsage,
+            currentMB = memoryUsage / (1024 * 1024),
+            highPressure = isMemoryHigh
+        }
+    });
+})
+.RequireRateLimiting("health");
+
+// Configuration endpoint
+app.MapGet("/config/streaming", (StreamingConfiguration config) =>
+{
+    return Results.Ok(new
+    {
+        streamingEnabled = config.EnableStreaming,
+        thresholdMB = config.StreamingThresholdBytes / (1024 * 1024),
+        maxFileSizeMB = config.MaxStreamingFileSize / (1024 * 1024),
+        timeoutSeconds = config.StreamTimeoutSeconds,
+        fallbackEnabled = config.EnableFallback,
+        maxConcurrentStreams = config.MaxConcurrentStreams
+    });
 })
 .RequireRateLimiting("health");
 
@@ -94,15 +163,18 @@ app.MapPost("/api/hide", async (IFormFile file, IImageProcessor processor) =>
             fileStream, 
             Path.GetFileName(file.FileName)
         );
-
-        using var outputStream = new MemoryStream();
-        await encodedImage.SaveAsPngAsync(outputStream);
         
         // Generate random PNG name to hide original file type
         var randomName = $"image_{Guid.NewGuid().ToString("N")[..8]}.png";
-        return Results.File(
-            outputStream.ToArray(), 
-            "image/png", 
+        
+        // Stream PNG directly to response
+        return Results.Stream(
+            async (stream, cancellationToken) => 
+            {
+                await StreamingResponseHandler.StreamImageToPngAsync(encodedImage, stream, cancellationToken);
+                encodedImage.Dispose();
+            },
+            "image/png",
             randomName
         );
     }
@@ -142,7 +214,7 @@ app.MapPost("/api/extract", async (HttpContext context, IFormFile image, IImageP
         // Add custom header for reliable filename extraction
         context.Response.Headers.Add("X-Original-Filename", originalFileName);
         
-        return Results.File(
+        return StreamingResponseHandler.CreateStreamingFileResult(
             extractedFile.Data,
             "application/octet-stream",
             originalFileName
