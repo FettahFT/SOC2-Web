@@ -8,7 +8,9 @@ import './App.css';
 function App() {
   const [mode, setMode] = useState('crypt'); // 'crypt' or 'decrypt'
   const [file, setFile] = useState(null);
+  const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [progress, setProgress] = useState(0);
   const [result, setResult] = useState(null);
   const [showIntro, setShowIntro] = useState(true);
   const [dragActive, setDragActive] = useState(false);
@@ -79,10 +81,19 @@ function App() {
     if (!file) return;
 
     setLoading(true);
+    setProgress(0);
     setResult(null);
+
+    // Simulate progress
+    const progressInterval = setInterval(() => {
+      setProgress(prev => Math.min(prev + 10, 90));
+    }, 500);
 
     const formData = new FormData();
     formData.append(mode === 'crypt' ? 'file' : 'image', file);
+    if (password) {
+      formData.append('password', password);
+    }
 
     try {
       const endpoint = mode === 'crypt' ? '/api/hide' : '/api/extract';
@@ -103,6 +114,7 @@ function App() {
       link.click();
       link.remove();
       
+      setProgress(100);
       setResult({
         success: true,
         filename: filename,
@@ -110,8 +122,9 @@ function App() {
         hash: 'SHA256_HASH_PLACEHOLDER'
       });
     } catch (error) {
+      setProgress(100);
       let errorMessage = error.message;
-      
+
       if (error.response?.data) {
         if (error.response.data instanceof Blob) {
           errorMessage = await error.response.data.text();
@@ -119,13 +132,14 @@ function App() {
           errorMessage = error.response.data;
         }
       }
-      
+
       setResult({
         success: false,
         message: errorMessage
       });
     } finally {
       setLoading(false);
+      clearInterval(progressInterval);
     }
   };
 
@@ -189,6 +203,27 @@ function App() {
         {/* Main Interface */}
         <div className="max-w-4xl mx-auto">
           <div className="backdrop-blur-2xl bg-gradient-to-br from-black/50 to-green-950/10 border border-green-500/30 rounded-2xl p-8 shadow-[0_0_50px_rgba(0,255,65,0.2)]">
+            {/* Password Input */}
+            <div className="mb-6">
+              <label htmlFor="password" className="block text-sm font-semibold text-green-400 mb-2">
+                Password (optional for encryption, required for encrypted files)
+                <span className="ml-2 text-xs text-green-600" title="Password protects your file with AES encryption. Use the same password for decryption.">
+                  ℹ️
+                </span>
+              </label>
+              <input
+                type="password"
+                id="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Enter password for encryption/decryption"
+                className="w-full px-4 py-3 bg-black/50 border border-green-500/40 rounded-lg text-green-400 placeholder-green-600 focus:outline-none focus:border-green-400 focus:ring-1 focus:ring-green-400 transition-all duration-300"
+              />
+              <p className="text-xs text-green-600 mt-1">
+                Leave empty for unencrypted files. Encrypted files require the correct password.
+              </p>
+            </div>
+
             {/* Upload Area */}
             <div
               onDragEnter={handleDrag}
@@ -210,19 +245,24 @@ function App() {
               <div className="text-center">
                 {file ? (
                   <>
-                    <FileImage className="w-16 h-16 mx-auto mb-4 text-green-400 animate-pulse" />
-                    <p className="text-lg text-green-400 mb-2 font-semibold">{file.name}</p>
+                    <FileImage className="w-16 h-16 mx-auto mb-4 text-green-400 animate-bounce" />
+                    <p className="text-lg text-green-400 mb-2 font-semibold truncate" title={file.name}>
+                      {file.name.length > 30 ? `${file.name.substring(0, 27)}...` : file.name}
+                    </p>
                     <p className="text-sm text-green-600">
-                      {(file.size / 1024 / 1024).toFixed(2)} MB
+                      {(file.size / 1024 / 1024).toFixed(2)} MB • {file.type || 'Unknown type'}
                     </p>
                   </>
                 ) : (
                   <>
-                    <Upload className="w-16 h-16 mx-auto mb-4 text-green-500/50" />
+                    <Upload className="w-16 h-16 mx-auto mb-4 text-green-500/50 animate-pulse" />
                     <p className="text-lg text-green-500 mb-2">
                       {mode === 'crypt' ? 'Drop file to encrypt' : 'Drop PNG to decrypt'}
                     </p>
                     <p className="text-sm text-green-700">or click to browse</p>
+                    <p className="text-xs text-green-800 mt-2">
+                      Max: {mode === 'crypt' ? '10MB files' : '25MB images'}
+                    </p>
                   </>
                 )}
               </div>
@@ -230,28 +270,46 @@ function App() {
 
             {/* Process Button */}
             {file && (
-              <button
-                onClick={handleProcess}
-                disabled={loading}
-                className="w-full py-4 px-6 bg-gradient-to-r from-green-600 to-green-500 hover:from-green-500 hover:to-green-400 text-black font-bold rounded-lg transition-all duration-300 shadow-[0_0_30px_rgba(0,255,65,0.4)] hover:shadow-[0_0_50px_rgba(0,255,65,0.6)] disabled:opacity-50 disabled:cursor-not-allowed tracking-wider"
-              >
-                {loading ? (
-                  <span className="flex items-center justify-center gap-3">
-                    <div className="w-5 h-5 border-2 border-black border-t-transparent rounded-full animate-spin" />
-                    PROCESSING...
-                  </span>
-                ) : (
-                  <span className="flex items-center justify-center gap-3">
-                    {mode === 'crypt' ? <Lock className="w-5 h-5" /> : <Unlock className="w-5 h-5" />}
-                    {mode === 'crypt' ? 'ENCRYPT TO PNG' : 'DECRYPT FROM PNG'}
-                  </span>
-                )}
-              </button>
+              <div className="relative">
+                <button
+                  onClick={handleProcess}
+                  disabled={loading}
+                  className={`w-full py-4 px-6 font-bold rounded-lg transition-all duration-300 tracking-wider relative overflow-hidden ${
+                    loading
+                      ? 'bg-green-950/20 text-green-400 border border-green-500/40'
+                      : 'bg-gradient-to-r from-green-600 to-green-500 hover:from-green-500 hover:to-green-400 text-black shadow-[0_0_30px_rgba(0,255,65,0.4)] hover:shadow-[0_0_50px_rgba(0,255,65,0.6)]'
+                  }`}
+                >
+                  {loading ? (
+                    <div className="flex items-center justify-center gap-3">
+                      <span className="text-sm font-mono">{progress}%</span>
+                      <span>PROCESSING...</span>
+                    </div>
+                  ) : (
+                    <span className="flex items-center justify-center gap-3">
+                      {mode === 'crypt' ? <Lock className="w-5 h-5" /> : <Unlock className="w-5 h-5" />}
+                      {mode === 'crypt' ? 'ENCRYPT TO PNG' : 'DECRYPT FROM PNG'}
+                    </span>
+                  )}
+
+                  {/* Progress Fill */}
+                  {loading && (
+                    <div
+                      className="absolute inset-0 bg-gradient-to-r from-green-600 to-green-500 transition-all duration-500 ease-out rounded-lg"
+                      style={{ width: `${progress}%` }}
+                    />
+                  )}
+                </button>
+              </div>
             )}
 
             {/* Result */}
             {result && (
-              <div className="mt-6 backdrop-blur-xl bg-green-950/20 border border-green-500/40 rounded-lg p-6 shadow-[0_0_20px_rgba(0,255,65,0.15)]">
+              <div className={`mt-6 backdrop-blur-xl border rounded-lg p-6 shadow-[0_0_20px_rgba(0,255,65,0.15)] transition-all duration-500 animate-fade-in ${
+                result.success
+                  ? 'bg-green-950/20 border-green-500/40'
+                  : 'bg-red-950/20 border-red-500/40'
+              }`}>
                 <div className="flex items-start gap-4">
                   {result.success ? (
                     <CheckCircle className="w-6 h-6 text-green-400 flex-shrink-0 mt-1" />

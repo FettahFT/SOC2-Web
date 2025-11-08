@@ -126,7 +126,7 @@ app.MapGet("/", () =>
 .RequireRateLimiting("health");
 
 // Encode endpoint - hide file in image
-app.MapPost("/api/hide", async (IFormFile file, IImageProcessor processor, CancellationToken cancellationToken) =>
+app.MapPost("/api/hide", async (IFormFile file, string? password, IImageProcessor processor, CancellationToken cancellationToken) =>
 {
     var startTime = DateTime.UtcNow;
     var initialMemory = GC.GetTotalMemory(false);
@@ -139,7 +139,7 @@ app.MapPost("/api/hide", async (IFormFile file, IImageProcessor processor, Cance
         
     // Check available memory before processing large files
     var availableMemory = GC.GetTotalMemory(false);
-    if (file!.Length > 15 * 1024 * 1024 && availableMemory > 500 * 1024 * 1024) // 15MB file, 500MB memory
+    if (file!.Length > 7 * 1024 * 1024 && availableMemory > 300 * 1024 * 1024) // 7MB file, 300MB memory
     {
         GC.Collect();
         GC.WaitForPendingFinalizers();
@@ -148,20 +148,31 @@ app.MapPost("/api/hide", async (IFormFile file, IImageProcessor processor, Cance
 
     try
     {
+        // Check memory before processing
+        var currentMemory = GC.GetTotalMemory(false);
+        if (currentMemory > 200 * 1024 * 1024) // 200MB
+        {
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            currentMemory = GC.GetTotalMemory(false);
+            Console.WriteLine($"[{DateTime.UtcNow}] Forced GC before encryption - Memory: {currentMemory / 1024 / 1024}MB");
+        }
+
         using var fileStream = file!.OpenReadStream();
         var encodedImage = await processor.CreateCarrierImageAsync(
-            fileStream, 
+            fileStream,
             Path.GetFileName(file!.FileName),
+            password,
             cancellationToken
         );
 
         // Generate random PNG name to hide original file type
         var randomName = $"image_{Guid.NewGuid().ToString("N")[..8]}.png";
-        
+
         // Convert to byte array to avoid disposal issues
         using var memoryStream = new MemoryStream();
         Console.WriteLine($"[{DateTime.UtcNow}] Saving image {encodedImage.Width}x{encodedImage.Height} to PNG");
-        
+
         try
         {
             await encodedImage.SaveAsync(memoryStream, new PngEncoder(), cancellationToken);
@@ -173,7 +184,7 @@ app.MapPost("/api/hide", async (IFormFile file, IImageProcessor processor, Cance
             Console.WriteLine($"[{DateTime.UtcNow}] Stack trace: {ex.StackTrace}");
             return Results.BadRequest(new { error = $"Failed to create PNG image: {ex.Message}" });
         }
-        
+
         // Verify image before disposal by reloading
         var imageBytes = memoryStream.ToArray();
         if (imageBytes.Length == 0)
@@ -181,7 +192,7 @@ app.MapPost("/api/hide", async (IFormFile file, IImageProcessor processor, Cance
             Console.WriteLine($"[{DateTime.UtcNow}] ERROR: Generated PNG is empty!");
             throw new InvalidOperationException("Generated PNG is empty");
         }
-        
+
         try
         {
             using var verifyStream = new MemoryStream(imageBytes);
@@ -194,7 +205,7 @@ app.MapPost("/api/hide", async (IFormFile file, IImageProcessor processor, Cance
             Console.WriteLine($"[{DateTime.UtcNow}] Image bytes length: {imageBytes.Length}, first 20 bytes: {Convert.ToHexString(imageBytes.Take(20).ToArray())}");
             throw new InvalidOperationException($"Generated image is invalid: {ex.Message}");
         }
-        
+
         encodedImage.Dispose(); // Dispose immediately after saving
         
         // Response is created above with memory cleanup
@@ -240,7 +251,7 @@ app.MapPost("/api/hide", async (IFormFile file, IImageProcessor processor, Cance
 .Produces(400);
 
 // Decode endpoint - extract file from image
-app.MapPost("/api/extract", async (HttpContext context, IFormFile image, IImageProcessor processor, CancellationToken cancellationToken) =>
+app.MapPost("/api/extract", async (HttpContext context, IFormFile image, string? password, IImageProcessor processor, CancellationToken cancellationToken) =>
 {
     var startTime = DateTime.UtcNow;
     var initialMemory = GC.GetTotalMemory(false);
@@ -253,7 +264,7 @@ app.MapPost("/api/extract", async (HttpContext context, IFormFile image, IImageP
         
     // Check available memory before processing large images
     var availableMemory = GC.GetTotalMemory(false);
-    if (image!.Length > 50 * 1024 * 1024 && availableMemory > 800 * 1024 * 1024) // 50MB image, 800MB memory
+    if (image!.Length > 15 * 1024 * 1024 && availableMemory > 400 * 1024 * 1024) // 15MB image, 400MB memory
     {
         GC.Collect();
         GC.WaitForPendingFinalizers();
@@ -264,14 +275,24 @@ app.MapPost("/api/extract", async (HttpContext context, IFormFile image, IImageP
     {
         using var imageStream = image!.OpenReadStream();
         Console.WriteLine($"[{DateTime.UtcNow}] Processing uploaded image: {image.FileName}, size: {image.Length} bytes");
-        
+
         // Read first few bytes to check if it's a valid PNG
         var buffer = new byte[20];
         var bytesRead = await imageStream.ReadAsync(buffer, 0, 20, cancellationToken);
         Console.WriteLine($"[{DateTime.UtcNow}] First 20 bytes: {Convert.ToHexString(buffer[..bytesRead])}");
         imageStream.Position = 0;
-        
-        var extractedFile = await processor.ExtractFileAsync(imageStream, cancellationToken);
+
+        // Check memory before processing
+        var currentMemory = GC.GetTotalMemory(false);
+        if (currentMemory > 300 * 1024 * 1024) // 300MB
+        {
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            currentMemory = GC.GetTotalMemory(false);
+            Console.WriteLine($"[{DateTime.UtcNow}] Forced GC - Memory before: {currentMemory / 1024 / 1024}MB");
+        }
+
+        var extractedFile = await processor.ExtractFileAsync(imageStream, password, cancellationToken);
         
         // Use the original filename stored in the image (includes extension)
         var originalFileName = extractedFile.FileName;
@@ -325,6 +346,52 @@ app.MapPost("/api/extract", async (HttpContext context, IFormFile image, IImageP
 .Produces(200, contentType: "application/octet-stream")
 .Produces(400);
 
+// Metadata endpoint - extract metadata without file
+app.MapPost("/api/metadata", async (IFormFile image, IImageProcessor processor, CancellationToken cancellationToken) =>
+{
+    var startTime = DateTime.UtcNow;
+    Console.WriteLine($"[{startTime}] Metadata endpoint accessed - Image: {image?.FileName}");
+
+    // Validate input
+    var validationResult = ValidateUploadedImage(image!);
+    if (validationResult != null)
+        return validationResult;
+
+    try
+    {
+        using var imageStream = image!.OpenReadStream();
+        var metadata = await processor.ExtractMetadataAsync(imageStream, cancellationToken);
+
+        return Results.Ok(new
+        {
+            signature = metadata.Signature,
+            fileSize = metadata.OriginalFileSize,
+            fileName = metadata.OriginalFileName,
+            sha256 = Convert.ToHexString(metadata.Sha256Hash),
+            isEncrypted = metadata.IsEncrypted
+        });
+    }
+    catch (InvalidDataException ex)
+    {
+        Console.WriteLine($"[{DateTime.UtcNow}] Metadata endpoint - Invalid data: {ex.Message}");
+        return Results.BadRequest(new { error = ex.Message });
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"[{DateTime.UtcNow}] Metadata endpoint error: {ex.GetType().Name} - {ex.Message}");
+        return Results.BadRequest(new { error = $"Metadata extraction failed: {ex.Message}" });
+    }
+    finally
+    {
+        GC.Collect();
+        var endTime = DateTime.UtcNow;
+        Console.WriteLine($"[{endTime}] Metadata endpoint completed - Duration: {(endTime - startTime).TotalSeconds:F2}s");
+    }
+})
+.RequireRateLimiting("extract")
+.Produces(200)
+.Produces(400);
+
 app.Run();
 
 // Helper method for file validation
@@ -333,8 +400,8 @@ static IResult? ValidateUploadedFile(IFormFile file)
     if (file == null || file.Length == 0)
         return Results.BadRequest(new { error = "No file uploaded" });
     
-    if (file.Length > 20 * 1024 * 1024)
-        return Results.BadRequest(new { error = "File too large. Maximum size is 20MB for server stability." });
+    if (file.Length > 10 * 1024 * 1024)
+        return Results.BadRequest(new { error = "File too large. Maximum size is 10MB for server stability." });
     
     if (string.IsNullOrWhiteSpace(file.FileName) || file.FileName.Length > 255)
         return Results.BadRequest(new { error = "Invalid filename" });
@@ -348,8 +415,8 @@ static IResult? ValidateUploadedImage(IFormFile image)
     if (image == null || image.Length == 0)
         return Results.BadRequest(new { error = "No image uploaded" });
     
-    if (image.Length > 50 * 1024 * 1024)
-        return Results.BadRequest(new { error = "Image too large. Maximum size is 50MB for server stability." });
+    if (image.Length > 25 * 1024 * 1024)
+        return Results.BadRequest(new { error = "Image too large. Maximum size is 25MB for server stability." });
     
     if (!image.ContentType.StartsWith("image/"))
         return Results.BadRequest(new { error = "Invalid file type. Please upload an image." });
