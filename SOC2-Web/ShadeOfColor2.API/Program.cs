@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.Server.IIS;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.AspNetCore.Http.Features;
+using Microsoft.AspNetCore.Diagnostics;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -91,9 +92,25 @@ var app = builder.Build();
 // Use CORS before other middleware
 app.UseCors("AllowAll");
 
-// Add error handling middleware
-app.UseExceptionHandler("/error");
-app.Map("/error", () => Results.Problem("An internal server error occurred."));
+// Add detailed error handling
+app.UseExceptionHandler(errorApp =>
+{
+    errorApp.Run(async context =>
+    {
+        var error = context.Features.Get<Microsoft.AspNetCore.Diagnostics.IExceptionHandlerFeature>();
+        Console.WriteLine($"[{DateTime.UtcNow}] Unhandled exception: {error?.Error?.GetType().Name} - {error?.Error?.Message}");
+        
+        context.Response.StatusCode = 500;
+        context.Response.ContentType = "application/json";
+        
+        await context.Response.WriteAsync(System.Text.Json.JsonSerializer.Serialize(new 
+        { 
+            error = "Server error occurred", 
+            type = error?.Error?.GetType().Name ?? "Unknown",
+            message = error?.Error?.Message ?? "Unknown error"
+        }));
+    });
+});
 app.UseRateLimiter();
 app.UseAntiforgery();
 
@@ -151,10 +168,17 @@ app.MapPost("/api/hide", async (IFormFile file, IImageProcessor processor) =>
     {
         return Results.BadRequest(new { error = ex.Message });
     }
+    catch (OutOfMemoryException ex)
+    {
+        Console.WriteLine($"[{DateTime.UtcNow}] Hide endpoint OOM: {ex.Message}");
+        GC.Collect();
+        return Results.BadRequest(new { error = "File too large for current server capacity. Try a smaller file." });
+    }
     catch (Exception ex)
     {
-        Console.WriteLine($"[{DateTime.UtcNow}] Hide endpoint error: {ex.Message}");
-        return Results.Problem("An error occurred while processing the file");
+        Console.WriteLine($"[{DateTime.UtcNow}] Hide endpoint error: {ex.GetType().Name} - {ex.Message}");
+        Console.WriteLine($"Stack trace: {ex.StackTrace}");
+        return Results.BadRequest(new { error = $"Processing failed: {ex.Message}" });
     }
     finally
     {
@@ -216,10 +240,17 @@ app.MapPost("/api/extract", async (HttpContext context, IFormFile image, IImageP
     {
         return Results.BadRequest(new { error = ex.Message });
     }
+    catch (OutOfMemoryException ex)
+    {
+        Console.WriteLine($"[{DateTime.UtcNow}] Extract endpoint OOM: {ex.Message}");
+        GC.Collect();
+        return Results.BadRequest(new { error = "Image too large for current server capacity. Try a smaller image." });
+    }
     catch (Exception ex)
     {
-        Console.WriteLine($"[{DateTime.UtcNow}] Extract endpoint error: {ex.Message}");
-        return Results.Problem("An error occurred while extracting the file");
+        Console.WriteLine($"[{DateTime.UtcNow}] Extract endpoint error: {ex.GetType().Name} - {ex.Message}");
+        Console.WriteLine($"Stack trace: {ex.StackTrace}");
+        return Results.BadRequest(new { error = $"Extraction failed: {ex.Message}" });
     }
     finally
     {

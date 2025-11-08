@@ -158,10 +158,17 @@ public class ImageProcessor : IImageProcessor
         if (stream.CanSeek)
             return stream.Length;
             
-        // For non-seekable streams, we need to read to get length
-        using var tempStream = new MemoryStream();
-        await stream.CopyToAsync(tempStream, cancellationToken);
-        return tempStream.Length;
+        // For non-seekable streams, count bytes without storing them
+        long totalBytes = 0;
+        var buffer = new byte[8192]; // 8KB buffer
+        int bytesRead;
+        
+        while ((bytesRead = await stream.ReadAsync(buffer, 0, buffer.Length, cancellationToken)) > 0)
+        {
+            totalBytes += bytesRead;
+        }
+        
+        return totalBytes;
     }
 
     private void WriteBytesToImage(Image<Rgba32> image, int startIndex, byte[] data)
