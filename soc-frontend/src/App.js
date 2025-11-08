@@ -14,11 +14,25 @@ function App() {
   const [result, setResult] = useState(null);
   const [showIntro, setShowIntro] = useState(true);
   const [dragActive, setDragActive] = useState(false);
+  const [fileEncrypted, setFileEncrypted] = useState(false);
 
   const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5046';
 
+  const checkFileEncrypted = async (file) => {
+    const formData = new FormData();
+    formData.append('image', file);
+
+    try {
+      const response = await axios.post(`${API_URL}/api/metadata`, formData);
+      setFileEncrypted(response.data.isEncrypted);
+    } catch (error) {
+      // If metadata fails, assume not encrypted
+      setFileEncrypted(false);
+    }
+  };
+
   useEffect(() => {
-    const timer = setTimeout(() => setShowIntro(false), 4000);
+    const timer = setTimeout(() => setShowIntro(false), 2000);
     return () => clearTimeout(timer);
   }, []);
 
@@ -38,47 +52,67 @@ function App() {
     setDragActive(false);
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
       const selectedFile = e.dataTransfer.files[0];
-      
+
       // File size validation (50MB limit)
       if (selectedFile.size > 50 * 1024 * 1024) {
         setResult({ success: false, message: 'File too large. Maximum size is 50MB.' });
         return;
       }
-      
+
       // File type validation for decrypt mode
       if (mode === 'decrypt' && !selectedFile.type.includes('png')) {
         setResult({ success: false, message: 'Please select a PNG file for decryption.' });
         return;
       }
-      
+
       setFile(selectedFile);
       setResult(null);
+
+      // Check if file is encrypted for decrypt mode
+      if (mode === 'decrypt') {
+        checkFileEncrypted(selectedFile);
+      } else {
+        setFileEncrypted(false);
+      }
     }
   };
 
   const handleFileChange = (e) => {
     if (e.target.files && e.target.files[0]) {
       const selectedFile = e.target.files[0];
-      
+
       // File size validation (50MB limit)
       if (selectedFile.size > 50 * 1024 * 1024) {
         setResult({ success: false, message: 'File too large. Maximum size is 50MB.' });
         return;
       }
-      
+
       // File type validation for decrypt mode
       if (mode === 'decrypt' && !selectedFile.type.includes('png')) {
         setResult({ success: false, message: 'Please select a PNG file for decryption.' });
         return;
       }
-      
+
       setFile(selectedFile);
       setResult(null);
+
+      // Check if file is encrypted for decrypt mode
+      if (mode === 'decrypt') {
+        checkFileEncrypted(selectedFile);
+      } else {
+        setFileEncrypted(false);
+      }
     }
   };
 
   const handleProcess = async () => {
     if (!file) return;
+
+    // Check password requirement for encrypted files
+    if (mode === 'decrypt' && fileEncrypted && !password) {
+      setResult({ success: false, message: 'Password is required to decrypt this encrypted file.' });
+      return;
+    }
 
     setLoading(true);
     setProgress(0);
@@ -118,8 +152,7 @@ function App() {
       setResult({
         success: true,
         filename: filename,
-        size: `${(response.data.size / 1024 / 1024).toFixed(2)} MB`,
-        hash: 'SHA256_HASH_PLACEHOLDER'
+        size: `${(response.data.size / 1024 / 1024).toFixed(2)} MB`
       });
     } catch (error) {
       setProgress(100);
@@ -206,10 +239,7 @@ function App() {
             {/* Password Input */}
             <div className="mb-6">
               <label htmlFor="password" className="block text-sm font-semibold text-green-400 mb-2">
-                Password (optional for encryption, required for encrypted files)
-                <span className="ml-2 text-xs text-green-600" title="Password protects your file with AES encryption. Use the same password for decryption.">
-                  ℹ️
-                </span>
+                Password {mode === 'crypt' ? '(optional for encryption)' : fileEncrypted ? '(required for this encrypted file)' : '(optional)'}
               </label>
               <input
                 type="password"
@@ -320,21 +350,17 @@ function App() {
                     <h3 className="text-lg font-semibold text-green-400 mb-3">
                       &gt; {result.success ? 'SUCCESS' : 'ERROR'}
                     </h3>
-                    {result.success ? (
-                      <div className="space-y-2 text-sm">
-                        <div className="flex justify-between">
-                          <span className="text-green-600">Output:</span>
-                          <span className="text-white">{result.filename}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-green-600">Size:</span>
-                          <span className="text-white">{result.size}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-green-600">SHA256:</span>
-                          <span className="text-white font-mono text-xs">{result.hash}</span>
-                        </div>
-                      </div>
+                     {result.success ? (
+                       <div className="space-y-2 text-sm">
+                         <div className="flex justify-between">
+                           <span className="text-green-600">Output:</span>
+                           <span className="text-white">{result.filename}</span>
+                         </div>
+                         <div className="flex justify-between">
+                           <span className="text-green-600">Size:</span>
+                           <span className="text-white">{result.size}</span>
+                         </div>
+                       </div>
                     ) : (
                       <p className="text-red-400">{result.message}</p>
                     )}
