@@ -5,7 +5,7 @@
 class ClientImageProcessor {
   static SIGNATURE = "SC";
   static MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
-  static BYTES_PER_PIXEL = 4;
+  static BYTES_PER_PIXEL = 3; // Use only RGB channels, Alpha is always 255
   static SHA256_SIZE = 32;
   static CHUNK_SIZE = 1024 * 1024; // 1MB chunks for memory management
 
@@ -60,9 +60,10 @@ class ClientImageProcessor {
     const canvas = document.createElement('canvas');
     canvas.width = imageSize;
     canvas.height = imageSize;
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
 
-    // Fill with white background
+
+    // Fill with opaque white background (alpha = 255)
     ctx.fillStyle = 'white';
     ctx.fillRect(0, 0, imageSize, imageSize);
 
@@ -91,7 +92,7 @@ class ClientImageProcessor {
   static async extractFileAsync(imageFile, password = null, onProgress = null) {
     const img = new Image();
     const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
 
     return new Promise((resolve, reject) => {
       img.onload = async () => {
@@ -154,7 +155,7 @@ class ClientImageProcessor {
   static async extractMetadataAsync(imageFile) {
     const img = new Image();
     const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
 
     return new Promise((resolve, reject) => {
       img.onload = () => {
@@ -208,9 +209,12 @@ class ClientImageProcessor {
       throw new Error('Filename too long');
     }
 
+    // This header structure must be byte-for-byte identical to the C# server-side implementation
     const baseHeaderSize = 2 + 8 + 4; // signature + fileSize + fileNameLength
     const isEncryptedByte = new Uint8Array([isEncrypted ? 1 : 0]);
     const currentSize = baseHeaderSize + fileNameBytes.length + 1; // +1 for isEncrypted
+    
+    // The C# code aligns the SHA hash to a 4-byte boundary. We must do the same.
     const padding = (4 - (currentSize % 4)) % 4;
     const totalHeaderSize = currentSize + padding + this.SHA256_SIZE;
 
@@ -221,17 +225,16 @@ class ClientImageProcessor {
     header.set(new TextEncoder().encode(this.SIGNATURE), offset);
     offset += 2;
 
-    // File size
-    const sizeBytes = new ArrayBuffer(8);
-    new DataView(sizeBytes).setUint32(0, fileSize & 0xFFFFFFFF, true); // little-endian low 32 bits
-    new DataView(sizeBytes).setUint32(4, (fileSize >>> 32) & 0xFFFFFFFF, true); // high 32 bits
-    header.set(new Uint8Array(sizeBytes), offset);
+    // File size (long -> 8 bytes, little-endian)
+    const sizeView = new DataView(new ArrayBuffer(8));
+    sizeView.setBigUint64(0, BigInt(fileSize), true);
+    header.set(new Uint8Array(sizeView.buffer), offset);
     offset += 8;
 
-    // Filename length
-    const nameLenBytes = new ArrayBuffer(4);
-    new DataView(nameLenBytes).setUint32(0, fileNameBytes.length, true);
-    header.set(new Uint8Array(nameLenBytes), offset);
+    // Filename length (int -> 4 bytes, little-endian)
+    const nameLenView = new DataView(new ArrayBuffer(4));
+    nameLenView.setUint32(0, fileNameBytes.length, true);
+    header.set(new Uint8Array(nameLenView.buffer), offset);
     offset += 4;
 
     // Filename
@@ -242,7 +245,7 @@ class ClientImageProcessor {
     header.set(isEncryptedByte, offset);
     offset += 1;
 
-    // Padding
+    // Padding (zero-filled by default)
     offset += padding;
 
     // SHA256 hash
@@ -263,8 +266,7 @@ class ClientImageProcessor {
 
     // Read file size (8 bytes starting at offset 2)
     const fileSizeBytes = this.readBytesFromPixelData(pixelData, 2, 8);
-    const fileSize = new DataView(fileSizeBytes.buffer).getUint32(0, true) +
-                     (new DataView(fileSizeBytes.buffer).getUint32(4, true) * 0x100000000);
+    const fileSize = new DataView(fileSizeBytes.buffer).getBigUint64(0, true);
 
     // Read filename length (4 bytes starting at offset 10)
     const fileNameLengthBytes = this.readBytesFromPixelData(pixelData, 10, 4);
@@ -297,48 +299,34 @@ class ClientImageProcessor {
 
   static readBytesFromPixelData(pixelData, startIndex, length) {
     const bytes = new Uint8Array(length);
-    console.log(`Reading ${length} bytes from pixelData starting at ${startIndex}`);
     for (let i = 0; i < length; i++) {
-      const pixelIndex = startIndex + i;
-      const pixelOffset = pixelIndex % 4;
-      const pixelPosition = Math.floor(pixelIndex / 4);
-      const arrayIndex = pixelPosition * 4 + pixelOffset;
-
-      if (arrayIndex < pixelData.length) {
-        bytes[i] = pixelData[arrayIndex];
-      }
-      if (i < 10) console.log(`Byte ${i}: pixelIndex=${pixelIndex}, offset=${pixelOffset}, position=${pixelPosition}, arrayIndex=${arrayIndex}, value=${bytes[i]}`);
+        const dataBytePosition = startIndex + i;
+        const pixel = Math.floor(dataBytePosition / 3);
+        const channel = dataBytePosition % 3;
+        const arrayIndex = pixel * 4 + channel;
+        if (arrayIndex < pixelData.length) {
+            bytes[i] = pixelData[arrayIndex];
+        }
     }
-    console.log(`Read bytes:`, bytes.slice(0, Math.min(10, length)));
     return bytes;
   }
 
   static readFileData(pixelData, startOffset, fileSize) {
-    const data = new Uint8Array(fileSize);
-    for (let i = 0; i < fileSize; i++) {
-      const pixelIndex = startOffset + i;
-      const pixelOffset = pixelIndex % 4;
-      const pixelPosition = Math.floor(pixelIndex / 4);
-      const arrayIndex = pixelPosition * 4 + pixelOffset;
-
-      if (arrayIndex < pixelData.length) {
-        data[i] = pixelData[arrayIndex];
-      }
-    }
-    return data;
+    return this.readBytesFromPixelData(pixelData, startOffset, fileSize);
   }
 
   static writeBytesToImageData(imageData, bytes) {
     console.log('Writing bytes to imageData, first 10 bytes:', bytes.slice(0, 10));
-    for (let i = 0; i < bytes.length; i++) {
-      const pixelIndex = i;
-      const pixelOffset = pixelIndex % 4;
-      const pixelPosition = Math.floor(pixelIndex / 4);
-      const arrayIndex = pixelPosition * 4 + pixelOffset;
-
-      if (arrayIndex < imageData.length) {
-        imageData[arrayIndex] = bytes[i];
-      }
+    let byteIndex = 0;
+    for (let i = 0; i < imageData.length && byteIndex < bytes.length; i += 4) {
+        imageData[i] = bytes[byteIndex++];
+        if (byteIndex < bytes.length) {
+            imageData[i + 1] = bytes[byteIndex++];
+        }
+        if (byteIndex < bytes.length) {
+            imageData[i + 2] = bytes[byteIndex++];
+        }
+        // The alpha channel (i + 3) is left untouched (it's 255 from the initial fill)
     }
     console.log('After writing, imageData first 16 bytes:', imageData.slice(0, 16));
   }
