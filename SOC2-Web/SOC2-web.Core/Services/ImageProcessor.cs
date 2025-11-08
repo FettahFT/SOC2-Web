@@ -273,10 +273,6 @@ public class ImageProcessor : IImageProcessor
 
         return new ExtractedFile(fileName, fileData, sha256Hash);
         }
-        catch (Exception ex)
-        {
-            throw new InvalidDataException($"Failed to extract file from image: {ex.Message}", ex);
-        }
         catch (OperationCanceledException)
         {
             // Clean up on cancellation
@@ -285,6 +281,10 @@ public class ImageProcessor : IImageProcessor
                 Array.Clear(fileData, 0, fileData.Length);
             }
             throw;
+        }
+        catch (Exception ex)
+        {
+            throw new InvalidDataException($"Failed to extract file from image: {ex.Message}", ex);
         }
         finally
         {
