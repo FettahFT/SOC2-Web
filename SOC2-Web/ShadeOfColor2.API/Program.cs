@@ -8,6 +8,8 @@ using Microsoft.AspNetCore.Server.IIS;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Diagnostics;
+using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.PixelFormats;
 
 var builder = WebApplication.CreateBuilder(args);
 
