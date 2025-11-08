@@ -1,6 +1,7 @@
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Formats.Png;
+using Microsoft.AspNetCore.Http;
 
 namespace ShadeOfColor2.Core.Services;
 
