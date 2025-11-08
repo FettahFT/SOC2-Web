@@ -15,29 +15,32 @@ builder.Services.AddAntiforgery();
 // Add rate limiting
 builder.Services.AddRateLimiter(options =>
 {
-    options.AddFixedWindowLimiter("hide", limiterOptions =>
-    {
-        limiterOptions.PermitLimit = 10;
-        limiterOptions.Window = TimeSpan.FromMinutes(1);
-        limiterOptions.QueueProcessingOrder = System.Threading.RateLimiting.QueueProcessingOrder.OldestFirst;
-        limiterOptions.QueueLimit = 0;
-    });
+    options.AddPolicy("hide", context =>
+        System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            factory: _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 10,
+                Window = TimeSpan.FromMinutes(1)
+            }));
     
-    options.AddFixedWindowLimiter("extract", limiterOptions =>
-    {
-        limiterOptions.PermitLimit = 15;
-        limiterOptions.Window = TimeSpan.FromMinutes(1);
-        limiterOptions.QueueProcessingOrder = System.Threading.RateLimiting.QueueProcessingOrder.OldestFirst;
-        limiterOptions.QueueLimit = 0;
-    });
+    options.AddPolicy("extract", context =>
+        System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            factory: _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 15,
+                Window = TimeSpan.FromMinutes(1)
+            }));
     
-    options.AddFixedWindowLimiter("health", limiterOptions =>
-    {
-        limiterOptions.PermitLimit = 100;
-        limiterOptions.Window = TimeSpan.FromMinutes(1);
-        limiterOptions.QueueProcessingOrder = System.Threading.RateLimiting.QueueProcessingOrder.OldestFirst;
-        limiterOptions.QueueLimit = 0;
-    });
+    options.AddPolicy("health", context =>
+        System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            factory: _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 100,
+                Window = TimeSpan.FromMinutes(1)
+            }));
 });
 
 // Add CORS for frontend
@@ -167,13 +170,13 @@ app.MapPost("/api/hide", async (IFormFile file, IImageProcessor processor) =>
         // Generate random PNG name to hide original file type
         var randomName = $"image_{Guid.NewGuid().ToString("N")[..8]}.png";
         
-        // Stream PNG directly to response
-        return Results.Stream(
-            async (stream, cancellationToken) => 
-            {
-                await StreamingResponseHandler.StreamImageToPngAsync(encodedImage, stream, cancellationToken);
-                encodedImage.Dispose();
-            },
+        // Create memory stream for PNG data
+        using var outputStream = new MemoryStream();
+        await StreamingResponseHandler.StreamImageToPngAsync(encodedImage, outputStream, CancellationToken.None);
+        encodedImage.Dispose();
+        
+        return Results.File(
+            outputStream.ToArray(),
             "image/png",
             randomName
         );
@@ -212,13 +215,12 @@ app.MapPost("/api/extract", async (HttpContext context, IFormFile image, IImageP
         Console.WriteLine($"[{DateTime.UtcNow}] Extracted file: {originalFileName}");
         
         // Add custom header for reliable filename extraction
-        context.Response.Headers.Add("X-Original-Filename", originalFileName);
+        context.Response.Headers["X-Original-Filename"] = originalFileName;
         
-        return Results.Stream(
-            new MemoryStream(extractedFile.Data),
+        return Results.File(
+            extractedFile.Data,
             "application/octet-stream",
-            originalFileName,
-            enableRangeProcessing: false
+            originalFileName
         );
     }
     catch (InvalidDataException ex)
