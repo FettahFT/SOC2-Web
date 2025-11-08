@@ -116,11 +116,11 @@ app.MapPost("/api/extract", async (IFormFile image) =>
                 
                 return Results.File(result, "application/octet-stream", "extracted_file");
             }
-        }
-        else
-        {
-            var error = await process.StandardError.ReadToEndAsync();
-            return Results.BadRequest(new { error = error });
+            else
+            {
+                var error = await process.StandardError.ReadToEndAsync();
+                return Results.BadRequest(new { error = error });
+            }
         }
     }
     catch (Exception ex)

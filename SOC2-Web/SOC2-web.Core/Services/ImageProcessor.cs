@@ -50,8 +50,6 @@ public class ImageProcessor : IImageProcessor
 
         // Calculate SHA256 hash from byte array
         var sha256Hash = SHA256.HashData(fileBytes);
-
-
         
         // Convert filename to bytes
         var fileNameBytes = System.Text.Encoding.UTF8.GetBytes(fileName);
@@ -192,23 +190,55 @@ public class ImageProcessor : IImageProcessor
                     // Stream doesn't support seeking, continue anyway
                 }
             }
+
+            // Validate stream has data
+            if (imageStream.Length == 0)
+                throw new InvalidDataException("Image stream is empty");
                 
-            // Load image
-            var image = await Image.LoadAsync<Rgba32>(imageStream, cancellationToken);
-        
+            // Load image with better error handling
+            Image<Rgba32> image;
+            try
+            {
+                image = await Image.LoadAsync<Rgba32>(imageStream, cancellationToken);
+            }
+            catch (UnknownImageFormatException ex)
+            {
+                throw new InvalidDataException($"Image format not supported or file is corrupted. {ex.Message}");
+            }
+            catch (InvalidImageContentException ex)
+            {
+                throw new InvalidDataException($"Image content is invalid or corrupted. {ex.Message}");
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidDataException($"Failed to load image: {ex.Message}");
+            }
+
+            // Validate image dimensions
+            if (image.Width == 0 || image.Height == 0)
+                throw new InvalidDataException("Image has invalid dimensions");
+
             // Read and verify signature
             var signatureBytes = ReadBytesFromImage(image, 0, 2);
             var signature = System.Text.Encoding.ASCII.GetString(signatureBytes);
             if (signature != _signature)
-                throw new InvalidDataException("Invalid signature. This is not a ShadeOfColor2 encoded image.");
+                throw new InvalidDataException($"Invalid signature '{signature}'. Expected '{_signature}'. This is not a ShadeOfColor2 encoded image.");
 
             // Read file size
             var fileSizeBytes = ReadBytesFromImage(image, 2, 8);
             var fileSize = BitConverter.ToInt64(fileSizeBytes);
 
+            // Validate file size
+            if (fileSize <= 0 || fileSize > MaxFileSize)
+                throw new InvalidDataException($"Invalid file size: {fileSize}");
+
             // Read filename length
             var fileNameLengthBytes = ReadBytesFromImage(image, 10, 4);
             var fileNameLength = BitConverter.ToInt32(fileNameLengthBytes);
+
+            // Validate filename length
+            if (fileNameLength <= 0 || fileNameLength > MaxFilenameLength)
+                throw new InvalidDataException($"Invalid filename length: {fileNameLength}");
 
             // Read filename
             var fileNameBytes = ReadBytesFromImage(image, 14, fileNameLength);
@@ -244,6 +274,10 @@ public class ImageProcessor : IImageProcessor
                 throw new InvalidDataException("SHA256 hash mismatch. File may be corrupted.");
 
             return new ExtractedFile(fileName, fileData, sha256Hash);
+        }
+        catch (InvalidDataException)
+        {
+            throw; // Re-throw our custom exceptions
         }
         catch (Exception ex)
         {

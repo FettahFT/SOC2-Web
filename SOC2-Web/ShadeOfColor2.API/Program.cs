@@ -2,14 +2,13 @@ using ShadeOfColor2.Core.Services;
 using System.Net.Mime;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Formats.Png;
+using SixLabors.ImageSharp.PixelFormats;
 using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.Server.IIS;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Diagnostics;
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.PixelFormats;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -134,13 +133,13 @@ app.MapPost("/api/hide", async (IFormFile file, IImageProcessor processor, Cance
     Console.WriteLine($"[{startTime}] Hide endpoint accessed - File: {file?.FileName}, Initial Memory: {initialMemory / 1024 / 1024}MB");
     
     // Validate input
-    var validationResult = ValidateUploadedFile(file);
+    var validationResult = ValidateUploadedFile(file!);
     if (validationResult != null)
         return validationResult;
         
     // Check available memory before processing large files
     var availableMemory = GC.GetTotalMemory(false);
-    if (file.Length > 15 * 1024 * 1024 && availableMemory > 500 * 1024 * 1024) // 15MB file, 500MB memory
+    if (file!.Length > 15 * 1024 * 1024 && availableMemory > 500 * 1024 * 1024) // 15MB file, 500MB memory
     {
         GC.Collect();
         GC.WaitForPendingFinalizers();
@@ -149,10 +148,10 @@ app.MapPost("/api/hide", async (IFormFile file, IImageProcessor processor, Cance
 
     try
     {
-        using var fileStream = file.OpenReadStream();
+        using var fileStream = file!.OpenReadStream();
         var encodedImage = await processor.CreateCarrierImageAsync(
             fileStream, 
-            Path.GetFileName(file.FileName),
+            Path.GetFileName(file!.FileName),
             cancellationToken
         );
 
@@ -161,23 +160,23 @@ app.MapPost("/api/hide", async (IFormFile file, IImageProcessor processor, Cance
         
         // Convert to byte array to avoid disposal issues
         using var memoryStream = new MemoryStream();
-        await encodedImage.SaveAsPngAsync(memoryStream, cancellationToken);
+        await encodedImage.SaveAsync(memoryStream, new PngEncoder(), cancellationToken);
         
         // Verify image before disposal by reloading
-        memoryStream.Position = 0;
+        var imageBytes = memoryStream.ToArray();
         try
         {
-            using var verifyImage = await Image.LoadAsync<Rgba32>(memoryStream, cancellationToken);
+            using var verifyStream = new MemoryStream(imageBytes);
+            using var verifyImage = await Image.LoadAsync<Rgba32>(verifyStream, cancellationToken);
             Console.WriteLine($"[{DateTime.UtcNow}] Encryption - Image saved and reloaded successfully: {verifyImage.Width}x{verifyImage.Height}");
         }
         catch (Exception ex)
         {
             Console.WriteLine($"[{DateTime.UtcNow}] Encryption - Failed to reload saved image: {ex.Message}");
+            throw new InvalidOperationException($"Generated image is invalid: {ex.Message}");
         }
         
         encodedImage.Dispose(); // Dispose immediately after saving
-        
-        var imageBytes = memoryStream.ToArray();
         
         var response = Results.File(
             imageBytes,
@@ -227,13 +226,13 @@ app.MapPost("/api/extract", async (HttpContext context, IFormFile image, IImageP
     Console.WriteLine($"[{startTime}] Extract endpoint accessed - Image: {image?.FileName}, Initial Memory: {initialMemory / 1024 / 1024}MB");
     
     // Validate input
-    var validationResult = ValidateUploadedImage(image);
+    var validationResult = ValidateUploadedImage(image!);
     if (validationResult != null)
         return validationResult;
         
     // Check available memory before processing large images
     var availableMemory = GC.GetTotalMemory(false);
-    if (image.Length > 50 * 1024 * 1024 && availableMemory > 800 * 1024 * 1024) // 50MB image, 800MB memory
+    if (image!.Length > 50 * 1024 * 1024 && availableMemory > 800 * 1024 * 1024) // 50MB image, 800MB memory
     {
         GC.Collect();
         GC.WaitForPendingFinalizers();
@@ -242,7 +241,7 @@ app.MapPost("/api/extract", async (HttpContext context, IFormFile image, IImageP
 
     try
     {
-        using var imageStream = image.OpenReadStream();
+        using var imageStream = image!.OpenReadStream();
         var extractedFile = await processor.ExtractFileAsync(imageStream, cancellationToken);
         
         // Use the original filename stored in the image (includes extension)
@@ -266,7 +265,13 @@ app.MapPost("/api/extract", async (HttpContext context, IFormFile image, IImageP
     }
     catch (InvalidDataException ex)
     {
+        Console.WriteLine($"[{DateTime.UtcNow}] Extract endpoint - Invalid data: {ex.Message}");
         return Results.BadRequest(new { error = ex.Message });
+    }
+    catch (UnknownImageFormatException ex)
+    {
+        Console.WriteLine($"[{DateTime.UtcNow}] Extract endpoint - Unknown image format: {ex.Message}");
+        return Results.BadRequest(new { error = "Image format not supported or file is corrupted" });
     }
     catch (OutOfMemoryException ex)
     {
