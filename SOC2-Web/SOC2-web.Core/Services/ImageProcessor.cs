@@ -1,6 +1,7 @@
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using System.Security.Cryptography;
+using SixLabors.ImageSharp.Formats;
 
 namespace ShadeOfColor2.Core.Services;
 
@@ -205,37 +206,21 @@ public class ImageProcessor : IImageProcessor
         byte[]? fileData = null;
         try
         {
-            // Reset stream position if possible
-            if (imageStream.CanSeek && imageStream.Position != 0)
+            // Copy stream to memory to avoid seeking issues
+            byte[] imageBytes;
+            if (imageStream is MemoryStream ms && imageStream.CanSeek)
             {
-                try
-                {
-                    imageStream.Position = 0;
-                }
-                catch (NotSupportedException)
-                {
-                    // Stream doesn't support seeking, continue anyway
-                }
+                imageBytes = ms.ToArray();
             }
-                
-            // Validate image format first
-            try
+            else
             {
-                var format = await Image.DetectFormatAsync(imageStream, cancellationToken);
-                if (format == null)
-                    throw new InvalidDataException("Unable to detect image format. Please ensure you're uploading a valid image file.");
-                    
-                // Reset stream position after format detection
-                if (imageStream.CanSeek)
-                    imageStream.Position = 0;
-            }
-            catch (Exception ex)
-            {
-                throw new InvalidDataException($"Invalid image format: {ex.Message}");
+                using var tempStream = new MemoryStream();
+                await imageStream.CopyToAsync(tempStream, cancellationToken);
+                imageBytes = tempStream.ToArray();
             }
             
-            // Load image
-            image = await Image.LoadAsync<Rgba32>(imageStream, cancellationToken);
+            // Load image from byte array
+            image = Image.Load<Rgba32>(imageBytes);
         
         // Read and verify signature
         var signatureBytes = ReadBytesFromImage(image, 0, 2);
@@ -297,6 +282,10 @@ public class ImageProcessor : IImageProcessor
                 Array.Clear(fileData, 0, fileData.Length);
             }
             throw;
+        }
+        catch (UnknownImageFormatException)
+        {
+            throw new InvalidDataException("This image was not created by ShadeOfColor2 or the file is corrupted.");
         }
         catch (Exception ex)
         {
