@@ -139,11 +139,11 @@ app.MapPost("/api/hide", async (IFormFile file, string password, IImageProcessor
     
     // Validate input
     if (string.IsNullOrWhiteSpace(password))
-        return Results.Text("Password is required", statusCode: 400);
+        return Results.Ok("Password is required");
 
     var validationError = ValidateUploadedFile(file!);
     if (validationError != null)
-        return Results.Text(validationError, statusCode: 400);
+        return Results.Ok(validationError);
         
     // Check available memory before processing large files
     var availableMemory = GC.GetTotalMemory(false);
@@ -228,19 +228,19 @@ app.MapPost("/api/hide", async (IFormFile file, string password, IImageProcessor
     }
     catch (ArgumentException ex)
     {
-        return Results.Text(ex.Message, statusCode: 400);
+        return Results.Ok(ex.Message);
     }
     catch (OutOfMemoryException ex)
     {
         Console.WriteLine($"[{DateTime.UtcNow}] Hide endpoint OOM: {ex.Message}");
         GC.Collect();
-        return Results.Text("File too large for current server capacity. Try a smaller file.", statusCode: 400);
+        return Results.Ok("File too large for current server capacity. Try a smaller file.");
     }
     catch (Exception ex)
     {
         Console.WriteLine($"[{DateTime.UtcNow}] Hide endpoint error: {ex.GetType().Name} - {ex.Message}");
         Console.WriteLine($"Stack trace: {ex.StackTrace}");
-        return Results.Text($"Processing failed: {ex.Message}", statusCode: 400);
+        return Results.Ok($"Processing failed: {ex.Message}");
     }
     finally
     {
@@ -268,7 +268,7 @@ app.MapPost("/api/extract", async (HttpContext context, IFormFile image, string?
     // Validate input
     var validationError = ValidateUploadedImage(image!);
     if (validationError != null)
-        return Results.Text(validationError, statusCode: 400);
+        return Results.Ok(validationError);
 
     Console.WriteLine($"[{DateTime.UtcNow}] Extract - Password provided: {!string.IsNullOrWhiteSpace(password)}");
 
@@ -311,24 +311,24 @@ app.MapPost("/api/extract", async (HttpContext context, IFormFile image, string?
     catch (InvalidDataException ex)
     {
         Console.WriteLine($"[{DateTime.UtcNow}] Extract endpoint - Invalid data: {ex.Message}");
-        return Results.Text(ex.Message, statusCode: 400);
+        return Results.Ok(ex.Message);
     }
     catch (UnknownImageFormatException ex)
     {
         Console.WriteLine($"[{DateTime.UtcNow}] Extract endpoint - Unknown image format: {ex.Message}");
-        return Results.Text("Image format not supported or file is corrupted", statusCode: 400);
+        return Results.Ok("Image format not supported or file is corrupted");
     }
     catch (OutOfMemoryException ex)
     {
         Console.WriteLine($"[{DateTime.UtcNow}] Extract endpoint OOM: {ex.Message}");
         GC.Collect();
-        return Results.Text("Image too large for current server capacity. Try a smaller image.", statusCode: 400);
+        return Results.Ok("Image too large for current server capacity. Try a smaller image.");
     }
     catch (Exception ex)
     {
         Console.WriteLine($"[{DateTime.UtcNow}] Extract endpoint error: {ex.GetType().Name} - {ex.Message}");
         Console.WriteLine($"Stack trace: {ex.StackTrace}");
-        return Results.Text($"Extraction failed: {ex.Message}", statusCode: 400);
+        return Results.Ok($"Extraction failed: {ex.Message}");
     }
     finally
     {
@@ -357,7 +357,7 @@ app.MapPost("/api/metadata", async (IFormFile image, IImageProcessor processor, 
     if (validationError != null)
     {
         Console.WriteLine($"[{DateTime.UtcNow}] Metadata validation failed: {validationError}");
-        return Results.Text(validationError, statusCode: 400);
+        return Results.Ok(validationError);
     }
 
     try
@@ -379,13 +379,13 @@ app.MapPost("/api/metadata", async (IFormFile image, IImageProcessor processor, 
     catch (InvalidDataException ex)
     {
         Console.WriteLine($"[{DateTime.UtcNow}] Metadata endpoint - Invalid data: {ex.Message}");
-        return Results.Text(ex.Message, statusCode: 400);
+        return Results.Ok(ex.Message);
     }
     catch (Exception ex)
     {
         Console.WriteLine($"[{DateTime.UtcNow}] Metadata endpoint error: {ex.GetType().Name} - {ex.Message}");
         Console.WriteLine($"[{DateTime.UtcNow}] Stack trace: {ex.StackTrace}");
-        return Results.Text($"Metadata extraction failed: {ex.Message}", statusCode: 400);
+        return Results.Ok($"Metadata extraction failed: {ex.Message}");
     }
     finally
     {

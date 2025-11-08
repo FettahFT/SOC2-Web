@@ -110,24 +110,39 @@ function App() {
         responseType: 'blob',
       });
 
-      const url = window.URL.createObjectURL(new Blob([response.data]));
+      // Check if the response is an error message
+      const blob = response.data;
+      const text = await blob.text();
+
+      // If the response looks like an error message (short text), show it as error
+      if (text.length < 200 && (text.includes("required") || text.includes("large") || text.includes("failed") || text.includes("invalid") || text.includes("corrupted"))) {
+        setProgress(100);
+        setResult({
+          success: false,
+          message: text
+        });
+        return;
+      }
+
+      // It's a successful file response
+      const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      
-      const filename = mode === 'crypt' 
+
+      const filename = mode === 'crypt'
         ? `image_${Math.random().toString(36).substring(2, 10)}.png`
         : response.headers['x-original-filename'] || 'extracted_file';
-      
+
       link.setAttribute('download', filename);
       document.body.appendChild(link);
       link.click();
       link.remove();
-      
+
       setProgress(100);
       setResult({
         success: true,
         filename: filename,
-        size: `${(response.data.size / 1024 / 1024).toFixed(2)} MB`
+        size: `${(blob.size / 1024 / 1024).toFixed(2)} MB`
       });
     } catch (error) {
       setProgress(100);
