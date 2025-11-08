@@ -206,39 +206,39 @@ public class ImageProcessor : IImageProcessor
         byte[]? fileData = null;
         try
         {
-            // Copy stream to memory to avoid seeking issues
-            byte[] imageBytes;
-            if (imageStream is MemoryStream ms && imageStream.CanSeek)
+            // Reset stream position if possible
+            if (imageStream.CanSeek && imageStream.Position != 0)
             {
-                imageBytes = ms.ToArray();
-            }
-            else
-            {
-                using var tempStream = new MemoryStream();
-                await imageStream.CopyToAsync(tempStream, cancellationToken);
-                imageBytes = tempStream.ToArray();
+                imageStream.Position = 0;
             }
             
-            // Load image from byte array
-            image = Image.Load<Rgba32>(imageBytes);
+            // Load image directly from stream (revert to original approach)
+            image = await Image.LoadAsync<Rgba32>(imageStream, cancellationToken);
+            
+            Console.WriteLine($"[{DateTime.UtcNow}] Image loaded successfully: {image.Width}x{image.Height}");
         
         // Read and verify signature
         var signatureBytes = ReadBytesFromImage(image, 0, 2);
         var signature = System.Text.Encoding.ASCII.GetString(signatureBytes);
+        Console.WriteLine($"[{DateTime.UtcNow}] Read signature: '{signature}', Expected: '{_signature}'");
+        
         if (signature != _signature)
-            throw new InvalidDataException("Invalid signature. This is not a ShadeOfColor2 encoded image.");
+            throw new InvalidDataException($"Invalid signature. Found '{signature}', expected '{_signature}'. This is not a ShadeOfColor2 encoded image.");
 
         // Read file size
         var fileSizeBytes = ReadBytesFromImage(image, 2, 8);
         var fileSize = BitConverter.ToInt64(fileSizeBytes);
+        Console.WriteLine($"[{DateTime.UtcNow}] File size: {fileSize} bytes");
 
         // Read filename length
         var fileNameLengthBytes = ReadBytesFromImage(image, 10, 4);
         var fileNameLength = BitConverter.ToInt32(fileNameLengthBytes);
+        Console.WriteLine($"[{DateTime.UtcNow}] Filename length: {fileNameLength}");
 
         // Read filename
         var fileNameBytes = ReadBytesFromImage(image, 14, fileNameLength);
         var fileName = System.Text.Encoding.UTF8.GetString(fileNameBytes);
+        Console.WriteLine($"[{DateTime.UtcNow}] Filename: '{fileName}'")
 
         // Calculate SHA256 offset (account for padding)
         var headerWithoutHash = 2 + 8 + 4 + fileNameLength;
@@ -283,8 +283,9 @@ public class ImageProcessor : IImageProcessor
             }
             throw;
         }
-        catch (UnknownImageFormatException)
+        catch (UnknownImageFormatException ex)
         {
+            Console.WriteLine($"[{DateTime.UtcNow}] UnknownImageFormatException: {ex.Message}");
             throw new InvalidDataException("This image was not created by ShadeOfColor2 or the file is corrupted.");
         }
         catch (Exception ex)
