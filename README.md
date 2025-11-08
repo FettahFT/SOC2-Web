@@ -2,12 +2,23 @@
 
 A purely client-side web application for hiding files inside PNG images using steganography. This project is a web-based user interface for the concepts demonstrated in the original [ShadeOfColor2 C# application by @archistico](https://github.com/archistico/ShadeOfColor2).
 
-**[Live Demo Hosted on Vercel]** *(<- Add your Vercel deployment link here!)*
+**[➡️ Go to the Live Web App Here! ⬅️]** *(<- Add your Vercel deployment link here!)*
 
 ---
 
 ![image](https://github.com/user-attachments/assets/e5205f8a-c393-431c-889a-033011145099)
 
+## 🚀 How to Use
+
+For everyone using the live web app, it's simple:
+
+1.  **Visit the web app link** provided above.
+2.  **Choose a mode:**
+    - **HIDE:** To hide a file inside an image.
+    - **EXTRACT:** To get a file from an image.
+3.  **Drag and drop** your file (any type for HIDE, a PNG for EXTRACT).
+4.  Click the **"HIDE IN PNG"** or **"EXTRACT FROM PNG"** button.
+5.  Your browser will automatically download the resulting file. That's it! Your files are never uploaded.
 
 ## ✨ Features
 
@@ -23,25 +34,11 @@ The application reads the raw bytes of your file and embeds them into the color 
 
 The alpha channel of the image is left untouched to prevent data corruption from premultiplied alpha, a common issue in canvas-based image manipulation.
 
-## 🛠️ Tech Stack
+---
 
-- **Frontend:** [React](https://reactjs.org/)
-- **Styling:** [Tailwind CSS](https://tailwindcss.com/)
-- **Core Logic:** Standard Browser APIs (Canvas, Web Crypto)
+## 💻 For Developers: Running Locally
 
-## 🚀 How to Use
-
-1.  **Visit the web app.**
-2.  **Choose a mode:**
-    - **HIDE:** To hide a file inside an image.
-    - **EXTRACT:** To get a file from an image.
-3.  **Drag and drop** your file (any type for HIDE, a PNG for EXTRACT).
-4.  Click the **"HIDE IN PNG"** or **"EXTRACT FROM PNG"** button.
-5.  Your browser will automatically download the resulting file.
-
-## 💻 Running Locally
-
-To run this project on your own machine:
+The following instructions are for developers who want to modify the code or contribute to the project. You do not need to do this to use the app.
 
 1.  **Clone the repository:**
     ```bash
