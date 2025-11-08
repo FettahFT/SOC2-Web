@@ -43,7 +43,10 @@ public class ImageProcessor : IImageProcessor
             fileBytes = tempStream.ToArray();
         }
 
+        var sha256Hash = SHA256.HashData(fileBytes);
+
         var isEncrypted = !string.IsNullOrEmpty(password);
+        Console.WriteLine($"Creating carrier image - Encrypted: {isEncrypted}");
         if (isEncrypted)
         {
             fileBytes = EncryptData(fileBytes, password!);
@@ -53,8 +56,6 @@ public class ImageProcessor : IImageProcessor
 
         if (fileSize > MaxFileSize)
             throw new ArgumentException($"File too large. Maximum size is {MaxFileSize / (1024 * 1024)}MB.");
-
-        var sha256Hash = SHA256.HashData(fileBytes);
         
         var fileNameBytes = System.Text.Encoding.UTF8.GetBytes(fileName);
         if (fileNameBytes.Length > MaxFilenameLength)
@@ -177,6 +178,7 @@ public class ImageProcessor : IImageProcessor
 
             var isEncryptedByte = ReadBytesFromImage(image, 14 + fileNameLength, 1);
             var isEncrypted = isEncryptedByte[0] == 1;
+            Console.WriteLine($"Extracting file - Encrypted: {isEncrypted}");
 
             var headerWithoutHash = 2 + 8 + 4 + fileNameLength + 1; // +1 for isEncrypted
             var sha256Offset = headerWithoutHash + (4 - (headerWithoutHash % 4)) % 4;
@@ -185,15 +187,20 @@ public class ImageProcessor : IImageProcessor
 
             var fileDataOffset = sha256Offset + Sha256HashSize;
             var fileData = ReadBytesFromImage(image, fileDataOffset, (int)fileSize);
+            Console.WriteLine($"fileDataOffset: {fileDataOffset}, fileSize: {fileSize}, fileData length: {fileData.Length}");
 
             if (isEncrypted)
             {
                 if (string.IsNullOrEmpty(password))
                     throw new InvalidDataException("File is encrypted but no password provided.");
+                Console.WriteLine("Decrypting...");
                 fileData = DecryptData(fileData, password);
+                Console.WriteLine($"Decrypted length: {fileData.Length}");
             }
 
             var computedHash = SHA256.HashData(fileData);
+            Console.WriteLine($"Computed hash: {Convert.ToHexString(computedHash)}");
+            Console.WriteLine($"Stored hash: {Convert.ToHexString(sha256Hash)}");
             if (!computedHash.SequenceEqual(sha256Hash))
                 throw new InvalidDataException("SHA256 hash mismatch. File may be corrupted or wrong password.");
 
@@ -214,8 +221,10 @@ public class ImageProcessor : IImageProcessor
         const int OldFileNameFieldLength = 256;
         const int Sha1Length = 20;
         
-        var fileSizeBytes = ReadBytesFromImage(image, 2, 8);
-        var fileSize = BitConverter.ToInt64(fileSizeBytes);
+            var fileSizeBytes = ReadBytesFromImage(image, 2, 8);
+            Console.WriteLine($"fileSizeBytes: {Convert.ToHexString(fileSizeBytes)}");
+            var fileSize = BitConverter.ToInt64(fileSizeBytes);
+            Console.WriteLine($"fileSize: {fileSize}");
         
         var fileNameBytes = ReadBytesFromImage(image, 10, OldFileNameFieldLength);
         var fileName = System.Text.Encoding.UTF8.GetString(fileNameBytes).TrimEnd('\0');
@@ -330,38 +339,44 @@ public class ImageProcessor : IImageProcessor
         }
     }
 
-    private byte[] EncryptData(byte[] data, string password)
-    {
-        using var aes = Aes.Create();
-        var key = new Rfc2898DeriveBytes(password, new byte[16], 10000, HashAlgorithmName.SHA256).GetBytes(32);
-        aes.GenerateIV(); // Generate random IV
-        var iv = aes.IV;
 
-        using var encryptor = aes.CreateEncryptor();
-        using var ms = new MemoryStream();
-        ms.Write(iv, 0, iv.Length); // Prepend IV
-        using (var cs = new CryptoStream(ms, encryptor, CryptoStreamMode.Write))
-        {
-            cs.Write(data, 0, data.Length);
-        }
-        return ms.ToArray();
-    }
 
     private byte[] DecryptData(byte[] data, string password)
     {
-        using var aes = Aes.Create();
         var key = new Rfc2898DeriveBytes(password, new byte[16], 10000, HashAlgorithmName.SHA256).GetBytes(32);
 
-        // Extract IV from beginning
         var iv = new byte[16];
         Array.Copy(data, 0, iv, 0, 16);
-        aes.IV = iv;
 
-        using var decryptor = aes.CreateDecryptor();
-        using var ms = new MemoryStream(data, 16, data.Length - 16); // Skip IV
-        using var cs = new CryptoStream(ms, decryptor, CryptoStreamMode.Read);
-        using var result = new MemoryStream();
-        cs.CopyTo(result);
-        return result.ToArray();
+        var encryptedData = data.Skip(16).ToArray();
+
+        using var aes = Aes.Create();
+        aes.Key = key;
+        aes.IV = iv;
+        aes.Padding = PaddingMode.PKCS7;
+        aes.Mode = CipherMode.CBC;
+
+        var decrypted = aes.DecryptCbc(encryptedData, iv);
+        return decrypted;
+    }
+
+    private byte[] EncryptData(byte[] data, string password)
+    {
+        var key = new Rfc2898DeriveBytes(password, new byte[16], 10000, HashAlgorithmName.SHA256).GetBytes(32);
+        var iv = new byte[16];
+        Random.Shared.NextBytes(iv);
+
+        using var aes = Aes.Create();
+        aes.Key = key;
+        aes.IV = iv;
+        aes.Padding = PaddingMode.PKCS7;
+        aes.Mode = CipherMode.CBC;
+
+        var encrypted = aes.EncryptCbc(data, iv);
+
+        using var ms = new MemoryStream();
+        ms.Write(iv, 0, iv.Length);
+        ms.Write(encrypted, 0, encrypted.Length);
+        return ms.ToArray();
     }
 }

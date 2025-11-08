@@ -261,7 +261,9 @@ app.MapPost("/api/extract", async (HttpContext context, IFormFile image, string?
     var validationResult = ValidateUploadedImage(image!);
     if (validationResult != null)
         return validationResult;
-        
+
+    Console.WriteLine($"[{DateTime.UtcNow}] Extract - Password provided: {!string.IsNullOrEmpty(password)}");
+
     // Check available memory before processing large images
     var availableMemory = GC.GetTotalMemory(false);
     if (image!.Length > 15 * 1024 * 1024 && availableMemory > 400 * 1024 * 1024) // 15MB image, 400MB memory
@@ -282,25 +284,15 @@ app.MapPost("/api/extract", async (HttpContext context, IFormFile image, string?
         Console.WriteLine($"[{DateTime.UtcNow}] First 20 bytes: {Convert.ToHexString(buffer[..bytesRead])}");
         imageStream.Position = 0;
 
-        // Check memory before processing
-        var currentMemory = GC.GetTotalMemory(false);
-        if (currentMemory > 300 * 1024 * 1024) // 300MB
-        {
-            GC.Collect();
-            GC.WaitForPendingFinalizers();
-            currentMemory = GC.GetTotalMemory(false);
-            Console.WriteLine($"[{DateTime.UtcNow}] Forced GC - Memory before: {currentMemory / 1024 / 1024}MB");
-        }
-
         var extractedFile = await processor.ExtractFileAsync(imageStream, password, cancellationToken);
-        
+
         // Use the original filename stored in the image (includes extension)
         var originalFileName = extractedFile.FileName;
         Console.WriteLine($"[{DateTime.UtcNow}] Extracted file: {originalFileName}, Size: {extractedFile.Data.Length / 1024 / 1024}MB");
-        
+
         // Add custom header for reliable filename extraction
         context.Response.Headers["X-Original-Filename"] = originalFileName;
-        
+
         // Create response
         return Results.File(
             extractedFile.Data,

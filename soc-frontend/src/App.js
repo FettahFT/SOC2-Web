@@ -210,7 +210,7 @@ function App() {
             {/* Password Input */}
             <div className="mb-6">
               <label htmlFor="password" className="block text-sm font-semibold text-green-400 mb-2">
-                Password (optional - leave empty for no encryption)
+                Password (optional)
               </label>
               <input
                 type="password"
