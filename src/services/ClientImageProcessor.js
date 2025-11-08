@@ -1,3 +1,6 @@
+// Cache-buster comment
+/* global pako */
+
 /**
  * Client-side Image Processor for Steganography
  * Supports two methods:
@@ -11,7 +14,6 @@ class ClientImageProcessor {
 
   static MAX_FILE_SIZE = 1024 * 1024 * 1024; // 1GB
   static BYTES_PER_PIXEL_GENERATED = 3; // RGB
-  static BITS_PER_PIXEL_LSB = 3; // LSB of R, G, B
   static SHA256_SIZE = 32;
 
   /**
@@ -19,43 +21,47 @@ class ClientImageProcessor {
    * @param {File} payloadFile - The file to hide.
    * @param {File} carrierImageFile - The image to hide the file in.
    * @param {string|null} password - Optional password for encryption.
+   * @param {number} bitDepth - The number of LSBs to use (1-4).
    * @param {function|null} onProgress - Progress callback.
    * @returns {Promise<Blob>} A new PNG blob with the hidden data.
    */
-  static async hideInExistingImageAsync(payloadFile, carrierImageFile, password = null, onProgress = null) {
+  static async hideInExistingImageAsync(payloadFile, carrierImageFile, password = null, bitDepth = 1, onProgress = null) {
     onProgress?.(5);
-    const [payloadData, carrierImg] = await Promise.all([
+    const [rawPayloadData, carrierImg] = await Promise.all([
       this._readFileAsArrayBuffer(payloadFile),
       this._loadImage(carrierImageFile),
     ]);
+    onProgress?.(10);
+
+    // Compress the payload first
+    const compressedPayload = pako.deflate(rawPayloadData);
     onProgress?.(15);
 
     const fileName = payloadFile.name;
     const isEncrypted = password != null;
 
-    // Process payload (hash, maybe encrypt)
-    const sha256Hash = await this._computeSHA256(payloadData);
-    let processedData = payloadData;
+    // Hash the ORIGINAL data, not the compressed or encrypted data
+    const sha256Hash = await this._computeSHA256(rawPayloadData);
+    onProgress?.(20);
+
+    let processedData = compressedPayload;
     if (isEncrypted) {
-      processedData = await this._encryptData(payloadData, password);
+      processedData = await this._encryptData(compressedPayload, password);
     }
     onProgress?.(30);
 
-    // Create header and combine with data
-    const header = this._createHeader(processedData.byteLength, fileName, sha256Hash, isEncrypted, this.ENCODING_TYPE_LSB);
+    const header = this._createHeader(processedData.byteLength, fileName, sha256Hash, isEncrypted, this.ENCODING_TYPE_LSB, true, bitDepth);
     const totalData = new Uint8Array(header.length + processedData.byteLength);
     totalData.set(header, 0);
     totalData.set(new Uint8Array(processedData), header.length);
     onProgress?.(40);
 
-    // Check if the carrier image has enough capacity
-    const carrierCapacity = Math.floor((carrierImg.width * carrierImg.height * this.BITS_PER_PIXEL_LSB) / 8);
+    const carrierCapacity = Math.floor((carrierImg.width * carrierImg.height * 3 * bitDepth) / 8);
     if (totalData.length > carrierCapacity) {
-      throw new Error(`File is too large for the selected carrier image. Required: ${totalData.length} bytes, Available: ${carrierCapacity} bytes.`);
+      throw new Error(`File is too large for the selected carrier image and bit depth. Required: ${totalData.length} bytes, Available: ${carrierCapacity} bytes.`);
     }
     onProgress?.(50);
 
-    // Encode data into the carrier image
     const canvas = document.createElement('canvas');
     canvas.width = carrierImg.width;
     canvas.height = carrierImg.height;
@@ -64,7 +70,7 @@ class ClientImageProcessor {
     const imageData = ctx.getImageData(0, 0, carrierImg.width, carrierImg.height);
     onProgress?.(60);
 
-    this._writeBitsToImageData(imageData.data, totalData);
+    this._writeDataWithBitDepth(imageData.data, totalData, bitDepth);
     onProgress?.(80);
 
     ctx.putImageData(imageData, 0, 0);
@@ -80,10 +86,6 @@ class ClientImageProcessor {
 
   /**
    * Creates a new carrier image from the file data (original method).
-   * @param {File} file - The file to hide.
-   * @param {string|null} password - Optional password for encryption.
-   * @param {function|null} onProgress - Progress callback.
-   * @returns {Promise<Blob>} PNG blob containing the hidden data.
    */
   static async createCarrierImageAsync(file, password = null, onProgress = null) {
     const fileData = await this._readFileAsArrayBuffer(file);
@@ -99,7 +101,7 @@ class ClientImageProcessor {
       onProgress?.(30);
     }
 
-    const header = this._createHeader(processedData.byteLength, file.name, sha256Hash, !!password, this.ENCODING_TYPE_GENERATED);
+    const header = this._createHeader(processedData.byteLength, file.name, sha256Hash, !!password, this.ENCODING_TYPE_GENERATED, false, 0);
     onProgress?.(40);
 
     const totalData = new Uint8Array(header.length + processedData.byteLength);
@@ -133,10 +135,6 @@ class ClientImageProcessor {
 
   /**
    * Extracts a file from any supported carrier image.
-   * @param {File} imageFile - PNG file with hidden data.
-   * @param {string|null} password - Optional password.
-   * @param {function|null} onProgress - Progress callback.
-   * @returns {Promise<{fileName: string, data: Uint8Array}>}
    */
   static async extractFileAsync(imageFile, password = null, onProgress = null) {
     const img = await this._loadImage(imageFile);
@@ -156,20 +154,26 @@ class ClientImageProcessor {
 
       let fileDataFromImage;
       if (headerInfo.encodingType === this.ENCODING_TYPE_LSB) {
-        fileDataFromImage = this._readBitsFromPixelData(pixelData, headerInfo.totalHeaderSize, headerInfo.fileSize);
+        fileDataFromImage = this._readDataWithBitDepth(pixelData, headerInfo.totalHeaderSize, headerInfo.fileSize, headerInfo.bitDepth);
       } else {
         fileDataFromImage = this._readBytesDirectly(pixelData, headerInfo.totalHeaderSize, headerInfo.fileSize);
       }
       onProgress?.(60);
 
-      let finalData = fileDataFromImage;
+      let decryptedData = fileDataFromImage;
       if (headerInfo.isEncrypted) {
         if (!password) throw new Error('File is encrypted, but no password was provided.');
         try {
-          finalData = await this._decryptData(fileDataFromImage, password);
+          decryptedData = await this._decryptData(fileDataFromImage, password);
         } catch (e) {
           throw new Error('Decryption failed. The password may be incorrect.');
         }
+      }
+      onProgress?.(70);
+
+      let finalData = decryptedData;
+      if (headerInfo.isCompressed) {
+        finalData = pako.inflate(decryptedData);
       }
       onProgress?.(80);
 
@@ -187,8 +191,6 @@ class ClientImageProcessor {
 
   /**
    * Extracts metadata from a carrier image.
-   * @param {File} imageFile - PNG file.
-   * @returns {Promise<Object>} Metadata object.
    */
   static async extractMetadataAsync(imageFile) {
     const img = await this._loadImage(imageFile);
@@ -203,59 +205,51 @@ class ClientImageProcessor {
 
   // --- INTERNAL HELPERS ---
 
-  // Header Management
-  static _createHeader(fileSize, fileName, sha256Hash, isEncrypted, encodingType) {
+  static _createHeader(fileSize, fileName, sha256Hash, isEncrypted, encodingType, isCompressed, bitDepth) {
     const fileNameBytes = new TextEncoder().encode(fileName);
     if (fileNameBytes.length > 255) throw new Error('Filename too long');
 
-    const header = new Uint8Array(512); // Allocate a generous fixed-size buffer
+    const header = new Uint8Array(512);
     let offset = 0;
 
-    // Signature (2 bytes)
     header.set(new TextEncoder().encode(this.SIGNATURE), offset);
     offset += 2;
-
-    // Encoding Type (1 byte)
     header[offset++] = encodingType;
+    header[offset++] = isCompressed ? 1 : 0;
+    header[offset++] = bitDepth;
 
-    // File size (8 bytes, little-endian)
     const sizeView = new DataView(new ArrayBuffer(8));
     // eslint-disable-next-line no-undef
     sizeView.setBigUint64(0, BigInt(fileSize), true);
     header.set(new Uint8Array(sizeView.buffer), offset);
     offset += 8;
 
-    // Filename length (1 byte)
     header[offset++] = fileNameBytes.length;
-
-    // Filename (up to 255 bytes)
     header.set(fileNameBytes, offset);
     offset += fileNameBytes.length;
 
-    // IsEncrypted (1 byte)
     header[offset++] = isEncrypted ? 1 : 0;
 
-    // SHA256 hash (32 bytes)
     header.set(sha256Hash, offset);
     offset += this.SHA256_SIZE;
 
-    // Return only the portion of the buffer that was used
     return header.slice(0, offset);
   }
 
   static _readHeader(pixelData) {
-    // The header itself is small, so we can read it using the appropriate method
-    // We assume the header is always written directly for simplicity, even in LSB mode.
-    const headerSignature = this._readBytesDirectly(pixelData, 0, 3);
-    const signature = String.fromCharCode(headerSignature[0], headerSignature[1]);
+    const sigBytes = this._readBytesDirectly(pixelData, 0, 5);
+    const signature = String.fromCharCode(sigBytes[0], sigBytes[1]);
     if (signature !== this.SIGNATURE) throw new Error('Invalid signature. Not a valid carrier image.');
     
-    const encodingType = headerSignature[2];
+    const encodingType = sigBytes[2];
+    const isCompressed = sigBytes[3] === 1;
+    const bitDepth = sigBytes[4];
+
     let readFunc = (encodingType === this.ENCODING_TYPE_LSB) 
-      ? (offset, len) => this._readBitsFromPixelData(pixelData, offset, len)
+      ? (offset, len) => this._readDataWithBitDepth(pixelData, offset, len, bitDepth)
       : (offset, len) => this._readBytesDirectly(pixelData, offset, len);
 
-    let offset = 3;
+    let offset = 5;
     const fileSizeData = readFunc(offset, 8);
     // eslint-disable-next-line no-undef
     const fileSize = new DataView(fileSizeData.buffer).getBigUint64(0, true);
@@ -277,17 +271,13 @@ class ClientImageProcessor {
     offset += this.SHA256_SIZE;
 
     return {
-      signature,
-      encodingType,
+      signature, encodingType, isCompressed, bitDepth,
       fileSize: Number(fileSize),
-      fileName,
-      isEncrypted,
-      sha256Hash,
+      fileName, isEncrypted, sha256Hash,
       totalHeaderSize: offset
     };
   }
 
-  // Data I/O: Direct (Generated Mode)
   static _writeBytesDirectly(imageData, bytes) {
     let byteIndex = 0;
     for (let i = 0; i < imageData.length && byteIndex < bytes.length; i += 4) {
@@ -308,36 +298,59 @@ class ClientImageProcessor {
     return bytes;
   }
 
-  // Data I/O: LSB (Subtle Mode)
-  static _writeBitsToImageData(imageData, bytes) {
-    let bitIndex = 0;
-    for (const byte of bytes) {
-      for (let i = 0; i < 8; i++) {
-        const bit = (byte >> (7 - i)) & 1;
-        const channelIndex = bitIndex * 4 + (bitIndex % 3);
-        imageData[channelIndex] = (imageData[channelIndex] & 0xFE) | bit;
-        bitIndex++;
+  static _writeDataWithBitDepth(imageData, bytes, bitDepth) {
+    let dataBitIndex = 0;
+    let dataByte = bytes[0];
+    let dataByteBitIndex = 0;
+
+    for (let i = 0; i < imageData.length; i++) {
+      if (i % 4 === 3) continue; // Skip alpha channel
+
+      if (dataBitIndex >= bytes.length * 8) break;
+
+      let bitsToStore = 0;
+      for (let j = 0; j < bitDepth; j++) {
+        if (dataBitIndex >= bytes.length * 8) break;
+        
+        const bit = (dataByte >> (7 - dataByteBitIndex)) & 1;
+        bitsToStore = (bitsToStore << 1) | bit;
+
+        dataBitIndex++;
+        dataByteBitIndex++;
+        if (dataByteBitIndex === 8) {
+          dataByteBitIndex = 0;
+          dataByte = bytes[Math.floor(dataBitIndex / 8)];
+        }
       }
+      
+      const originalChannelValue = imageData[i];
+      const clearedChannelValue = originalChannelValue & (0xFF << bitDepth);
+      imageData[i] = clearedChannelValue | bitsToStore;
     }
   }
 
-  static _readBitsFromPixelData(pixelData, startOffset, length) {
+  static _readDataWithBitDepth(pixelData, startOffset, length, bitDepth) {
     const bytes = new Uint8Array(length);
+    // eslint-disable-next-line no-unused-vars
+    const mask = (1 << bitDepth) - 1;
     let bitIndex = startOffset * 8;
+
     for (let i = 0; i < length; i++) {
       let currentByte = 0;
-      for (let j = 0; j < 8; j++) {
-        const channelIndex = bitIndex * 4 + (bitIndex % 3);
-        const bit = pixelData[channelIndex] & 1;
-        currentByte = (currentByte << 1) | bit;
-        bitIndex++;
+      for (let j = 0; j < 8; j += bitDepth) {
+        if (bitIndex >= pixelData.length * 8) break;
+        const pixelIndex = Math.floor(bitIndex / (3 * bitDepth));
+        const channelOffset = Math.floor((bitIndex % (3 * bitDepth)) / bitDepth);
+        const channelIndex = pixelIndex * 4 + channelOffset;
+        const bits = pixelData[channelIndex] & mask;
+        currentByte = (currentByte << bitDepth) | bits;
+        bitIndex += bitDepth;
       }
       bytes[i] = currentByte;
     }
     return bytes;
   }
 
-  // Crypto & File Helpers
   static async _readFileAsArrayBuffer(file) {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
