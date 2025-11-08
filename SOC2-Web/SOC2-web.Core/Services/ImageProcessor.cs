@@ -206,7 +206,7 @@ public class ImageProcessor : IImageProcessor
 
         // Read file data using streaming for large files
         var fileDataOffset = sha256Offset + Sha256HashSize;
-        fileData = await ReadFileDataStreamingAsync(image, fileDataOffset, (int)fileSize, cancellationToken);
+        fileData = ReadBytesFromImage(image, fileDataOffset, (int)fileSize);
 
         // Dispose image immediately after reading data
         image.Dispose();
@@ -260,42 +260,7 @@ public class ImageProcessor : IImageProcessor
         }
     }
     
-    private async Task<byte[]> ReadFileDataStreamingAsync(Image<Rgba32> image, int startIndex, int length, CancellationToken cancellationToken)
-    {
-        const int chunkSize = 512 * 1024; // 512KB chunks for better CPU utilization
-        var result = new byte[length];
-        var processedBytes = 0;
-        
-        // Disable parallel processing temporarily to avoid data corruption
-        // TODO: Re-enable after fixing thread safety issues
-        if (false) // length > 10 * 1024 * 1024) // 10MB+
-        {
-            // Parallel processing code disabled
-        }
-        else
-        {
-            // Sequential processing for smaller files
-            while (processedBytes < length)
-            {
-                var remainingBytes = length - processedBytes;
-                var currentChunkSize = Math.Min(chunkSize, remainingBytes);
-                
-                var chunk = ReadBytesFromImage(image, startIndex + processedBytes, currentChunkSize);
-                Array.Copy(chunk, 0, result, processedBytes, currentChunkSize);
-                
-                processedBytes += currentChunkSize;
-                
-                // Check cancellation more frequently
-                cancellationToken.ThrowIfCancellationRequested();
-                
-                // Yield less frequently to improve performance
-                if (processedBytes % (4 * 1024 * 1024) == 0) // Every 4MB
-                    await Task.Yield();
-            }
-        }
-        
-        return result;
-    }
+
 
     private byte[] ReadBytesFromImage(Image<Rgba32> image, int startIndex, int length)
     {
