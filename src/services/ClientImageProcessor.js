@@ -237,62 +237,97 @@ class ClientImageProcessor {
   }
 
   static _readHeader(pixelData) {
-    // Try reading as LSB first, then fall back to direct reading
-    let sigBytes, encodingType, isCompressed, bitDepth, signature;
-    
+    // First try direct reading (for generated images)
     try {
-      // First try reading with bit depth 1 (most common LSB)
-      sigBytes = this._readDataWithBitDepth(pixelData, 0, 5, 1);
-      signature = String.fromCharCode(sigBytes[0], sigBytes[1]);
+      const sigBytes = this._readBytesDirectly(pixelData, 0, 5);
+      const signature = String.fromCharCode(sigBytes[0], sigBytes[1]);
       if (signature === this.SIGNATURE) {
-        encodingType = sigBytes[2];
-        isCompressed = sigBytes[3] === 1;
-        bitDepth = sigBytes[4];
-      } else {
-        throw new Error('Not LSB encoded');
+        const encodingType = sigBytes[2];
+        const isCompressed = sigBytes[3] === 1;
+        const bitDepth = sigBytes[4];
+        
+        let readFunc = (encodingType === this.ENCODING_TYPE_LSB) 
+          ? (offset, len) => this._readDataWithBitDepth(pixelData, offset, len, bitDepth)
+          : (offset, len) => this._readBytesDirectly(pixelData, offset, len);
+        
+        let offset = 5;
+        const fileSizeData = readFunc(offset, 8);
+        const fileSize = new DataView(fileSizeData.buffer).getBigUint64(0, true);
+        offset += 8;
+
+        const fileNameLengthData = readFunc(offset, 1);
+        const fileNameLength = fileNameLengthData[0];
+        offset += 1;
+
+        const fileNameBytes = readFunc(offset, fileNameLength);
+        const fileName = new TextDecoder().decode(fileNameBytes);
+        offset += fileNameLength;
+
+        const isEncryptedData = readFunc(offset, 1);
+        const isEncrypted = isEncryptedData[0] === 1;
+        offset += 1;
+
+        const sha256Hash = readFunc(offset, this.SHA256_SIZE);
+        offset += this.SHA256_SIZE;
+
+        return {
+          signature, encodingType, isCompressed, bitDepth,
+          fileSize: Number(fileSize),
+          fileName, isEncrypted, sha256Hash,
+          totalHeaderSize: offset
+        };
       }
-    } catch {
-      // Fall back to direct reading for generated images
-      sigBytes = this._readBytesDirectly(pixelData, 0, 5);
-      signature = String.fromCharCode(sigBytes[0], sigBytes[1]);
-      if (signature !== this.SIGNATURE) throw new Error('Invalid signature. Not a valid carrier image.');
-      
-      encodingType = sigBytes[2];
-      isCompressed = sigBytes[3] === 1;
-      bitDepth = sigBytes[4];
+    } catch (e) {
+      // Continue to LSB attempt
     }
+    
+    // Try LSB reading with different bit depths
+    for (let testBitDepth = 1; testBitDepth <= 8; testBitDepth++) {
+      try {
+        const sigBytes = this._readDataWithBitDepth(pixelData, 0, 5, testBitDepth);
+        const signature = String.fromCharCode(sigBytes[0], sigBytes[1]);
+        if (signature === this.SIGNATURE) {
+          const encodingType = sigBytes[2];
+          const isCompressed = sigBytes[3] === 1;
+          const bitDepth = sigBytes[4];
+          
+          if (encodingType === this.ENCODING_TYPE_LSB && bitDepth === testBitDepth) {
+            const readFunc = (offset, len) => this._readDataWithBitDepth(pixelData, offset, len, bitDepth);
+            
+            let offset = 5;
+            const fileSizeData = readFunc(offset, 8);
+            const fileSize = new DataView(fileSizeData.buffer).getBigUint64(0, true);
+            offset += 8;
 
-    let readFunc = (encodingType === this.ENCODING_TYPE_LSB) 
-      ? (offset, len) => this._readDataWithBitDepth(pixelData, offset, len, bitDepth)
-      : (offset, len) => this._readBytesDirectly(pixelData, offset, len);
+            const fileNameLengthData = readFunc(offset, 1);
+            const fileNameLength = fileNameLengthData[0];
+            offset += 1;
 
-    let offset = 5;
-    const fileSizeData = readFunc(offset, 8);
-    // eslint-disable-next-line no-undef
-    const fileSize = new DataView(fileSizeData.buffer).getBigUint64(0, true);
-    offset += 8;
+            const fileNameBytes = readFunc(offset, fileNameLength);
+            const fileName = new TextDecoder().decode(fileNameBytes);
+            offset += fileNameLength;
 
-    const fileNameLengthData = readFunc(offset, 1);
-    const fileNameLength = fileNameLengthData[0];
-    offset += 1;
+            const isEncryptedData = readFunc(offset, 1);
+            const isEncrypted = isEncryptedData[0] === 1;
+            offset += 1;
 
-    const fileNameBytes = readFunc(offset, fileNameLength);
-    const fileName = new TextDecoder().decode(fileNameBytes);
-    offset += fileNameLength;
+            const sha256Hash = readFunc(offset, this.SHA256_SIZE);
+            offset += this.SHA256_SIZE;
 
-    const isEncryptedData = readFunc(offset, 1);
-    const isEncrypted = isEncryptedData[0] === 1;
-    offset += 1;
-
-    const sha256Hash = readFunc(offset, this.SHA256_SIZE);
-    offset += this.SHA256_SIZE;
-
-    return {
-      signature, encodingType, isCompressed, bitDepth,
-      fileSize: Number(fileSize),
-      fileName, isEncrypted, sha256Hash,
-      totalHeaderSize: offset
-    };
+            return {
+              signature, encodingType, isCompressed, bitDepth,
+              fileSize: Number(fileSize),
+              fileName, isEncrypted, sha256Hash,
+              totalHeaderSize: offset
+            };
+          }
+        }
+      } catch (e) {
+        // Continue trying next bit depth
+      }
+    }
+    
+    throw new Error('Invalid signature. Not a valid carrier image.');
   }
 
   static _writeBytesDirectly(imageData, bytes) {
