@@ -1,11 +1,3 @@
-# Build frontend
-FROM node:18 AS frontend-build
-WORKDIR /app
-COPY soc-frontend/package*.json ./
-RUN npm ci
-COPY soc-frontend/ ./
-RUN npm run build
-
 # Build backend
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS backend-build
 WORKDIR /src
@@ -29,7 +21,6 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=backend-build /app/publish .
-COPY --from=frontend-build /app/build ./wwwroot
 
 EXPOSE 80
 ENV ASPNETCORE_URLS=http://+:80
