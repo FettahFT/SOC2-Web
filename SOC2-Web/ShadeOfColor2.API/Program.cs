@@ -197,19 +197,16 @@ app.MapPost("/api/hide", async (IFormFile file, IImageProcessor processor, Cance
         
         encodedImage.Dispose(); // Dispose immediately after saving
         
-        // Set proper headers to prevent corruption
-        var response = Results.Bytes(
-            imageBytes,
-            "image/png",
-            randomName
+        // Create custom response with proper headers to prevent corruption
+        return Results.Stream(
+            new MemoryStream(imageBytes),
+            "application/octet-stream",
+            randomName,
+            lastModified: DateTimeOffset.UtcNow,
+            entityTag: null
         );
         
         Console.WriteLine($"[{DateTime.UtcNow}] Returning PNG file: {randomName}, size: {imageBytes.Length} bytes");
-        
-        // Clear memory array immediately
-        Array.Clear(imageBytes, 0, imageBytes.Length);
-        
-        return response;
     }
     catch (ArgumentException ex)
     {
@@ -264,6 +261,14 @@ app.MapPost("/api/extract", async (HttpContext context, IFormFile image, IImageP
     try
     {
         using var imageStream = image!.OpenReadStream();
+        Console.WriteLine($"[{DateTime.UtcNow}] Processing uploaded image: {image.FileName}, size: {image.Length} bytes");
+        
+        // Read first few bytes to check if it's a valid PNG
+        var buffer = new byte[20];
+        var bytesRead = await imageStream.ReadAsync(buffer, 0, 20, cancellationToken);
+        Console.WriteLine($"[{DateTime.UtcNow}] First 20 bytes: {Convert.ToHexString(buffer[..bytesRead])}");
+        imageStream.Position = 0;
+        
         var extractedFile = await processor.ExtractFileAsync(imageStream, cancellationToken);
         
         // Use the original filename stored in the image (includes extension)
