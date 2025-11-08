@@ -137,23 +137,23 @@ function App() {
       <MatrixRain />
       
       {showIntro && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black p-4">
           <div className="text-center">
-            <h1 className="text-6xl font-bold mb-4 text-green-400">
+            <h1 className="text-4xl sm:text-5xl md:text-6xl font-bold mb-4 text-green-400">
                <TypeWriter text="SHADE_OF_COLOR_2" delay={80} />
              </h1>
-             <p className="text-xl text-green-500">
+             <p className="text-lg sm:text-xl text-green-500">
                <TypeWriter text="> Steganography System Online..." delay={50} />
              </p>
           </div>
         </div>
       )}
 
-      <div className="relative z-10 min-h-screen p-8">
+      <div className="relative z-10 min-h-screen p-4 md:p-8">
         {/* Header */}
-        <header className="mb-12 text-center">
+        <header className="mb-8 sm:mb-12 text-center">
           <div className="inline-block">
-            <h1 className="text-5xl font-bold mb-2 text-transparent bg-clip-text bg-gradient-to-r from-green-400 to-white drop-shadow-[0_0_20px_rgba(0,255,65,0.5)]">
+            <h1 className="text-3xl sm:text-4xl md:text-5xl font-bold mb-2 text-transparent bg-clip-text bg-gradient-to-r from-green-400 to-white drop-shadow-[0_0_20px_rgba(0,255,65,0.5)]">
               SHADE_OF_COLOR_2
             </h1>
              <p className="text-sm text-green-500 tracking-widest">
@@ -165,23 +165,23 @@ function App() {
         {/* Mode Selector */}
         <div className="max-w-2xl mx-auto mb-8">
           <div className="backdrop-blur-xl bg-black/30 border border-green-500/30 rounded-lg p-1 shadow-[0_0_30px_rgba(0,255,65,0.15)]">
-            <div className="mode-selector-container grid grid-cols-2 gap-2">
+            <div className="mode-selector-container grid grid-cols-2 gap-1 sm:gap-2">
               <div className={`moving-border ${mode === 'decrypt' ? 'decrypt' : ''}`}></div>
                <button
                  onClick={() => setMode('crypt')}
-                 className="mode-selector-button flex items-center justify-center gap-2 py-4 px-6 text-green-400"
+                 className="mode-selector-button flex items-center justify-center gap-2 py-3 px-4 sm:py-4 sm:px-6 text-green-400"
                  style={{ outline: 'none', boxShadow: 'none', border: 'none', backgroundColor: 'transparent' }}
                >
                  <Lock className="w-5 h-5" />
-                 <span className="font-semibold tracking-wider">HIDE</span>
+                 <span className="font-semibold tracking-wider text-sm sm:text-base">HIDE</span>
                </button>
                <button
                  onClick={() => setMode('decrypt')}
-                 className="mode-selector-button flex items-center justify-center gap-2 py-4 px-6 text-green-400"
+                 className="mode-selector-button flex items-center justify-center gap-2 py-3 px-4 sm:py-4 sm:px-6 text-green-400"
                  style={{ outline: 'none', boxShadow: 'none', border: 'none', backgroundColor: 'transparent' }}
                >
                  <Unlock className="w-5 h-5" />
-                 <span className="font-semibold tracking-wider">EXTRACT</span>
+                 <span className="font-semibold tracking-wider text-sm sm:text-base">EXTRACT</span>
                </button>
             </div>
           </div>
@@ -189,7 +189,7 @@ function App() {
 
         {/* Main Interface */}
         <div className="max-w-4xl mx-auto">
-          <div className="backdrop-blur-2xl bg-gradient-to-br from-black/50 to-green-950/10 border border-green-500/30 rounded-2xl p-8 shadow-[0_0_50px_rgba(0,255,65,0.2)]">
+          <div className="backdrop-blur-2xl bg-gradient-to-br from-black/50 to-green-950/10 border border-green-500/30 rounded-2xl p-4 sm:p-6 md:p-8 shadow-[0_0_50px_rgba(0,255,65,0.2)]">
 
             {/* Upload Area */}
             <div
@@ -197,7 +197,7 @@ function App() {
               onDragLeave={handleDrag}
               onDragOver={handleDrag}
               onDrop={handleDrop}
-              className={`relative border-2 border-dashed rounded-xl p-12 mb-6 transition-all duration-300 ${
+              className={`relative border-2 border-dashed rounded-xl p-6 sm:p-8 md:p-12 mb-6 transition-all duration-300 ${
                 dragActive
                   ? 'border-green-400 bg-green-500/10 shadow-[0_0_30px_rgba(0,255,65,0.3)]'
                   : 'border-green-500/40 hover:border-green-400/60 hover:bg-green-500/5'
@@ -212,18 +212,18 @@ function App() {
               <div className="text-center">
                 {file ? (
                   <>
-                    <FileImage className="w-16 h-16 mx-auto mb-4 text-green-400 animate-bounce" />
-                    <p className="text-lg text-green-400 mb-2 font-semibold truncate" title={file.name}>
+                    <FileImage className="w-12 h-12 sm:w-16 sm:h-16 mx-auto mb-4 text-green-400 animate-bounce" />
+                    <p className="text-base sm:text-lg text-green-400 mb-2 font-semibold truncate" title={file.name}>
                       {file.name.length > 30 ? `${file.name.substring(0, 27)}...` : file.name}
                     </p>
-                    <p className="text-sm text-green-600">
+                    <p className="text-xs sm:text-sm text-green-600">
                       {(file.size / 1024 / 1024).toFixed(2)} MB • {file.type || 'Unknown type'}
                     </p>
                   </>
                 ) : (
                   <>
-                    <Upload className="w-16 h-16 mx-auto mb-4 text-green-500/50 animate-pulse" />
-                     <p className="text-lg text-green-500 mb-2">
+                    <Upload className="w-12 h-12 sm:w-16 sm:h-16 mx-auto mb-4 text-green-500/50 animate-pulse" />
+                     <p className="text-base sm:text-lg text-green-500 mb-2">
                        {mode === 'crypt' ? 'Drop file to hide in PNG' : 'Drop PNG to extract file'}
                      </p>
                      <p className="text-sm text-green-700">or click to browse</p>
@@ -274,7 +274,7 @@ function App() {
 
             {/* Result */}
             {result && (
-              <div className={`mt-6 backdrop-blur-xl border rounded-lg p-6 shadow-[0_0_20px_rgba(0,255,65,0.15)] transition-all duration-500 animate-fade-in ${
+              <div className={`mt-6 backdrop-blur-xl border rounded-lg p-4 sm:p-6 shadow-[0_0_20px_rgba(0,255,65,0.15)] transition-all duration-500 animate-fade-in ${
                 result.success
                   ? 'bg-green-950/20 border-green-500/40'
                   : 'bg-red-950/20 border-red-500/40'
@@ -321,7 +321,7 @@ function App() {
           </div>
 
           {/* Info Section */}
-          <div className="mt-8 backdrop-blur-xl bg-black/20 border border-green-500/20 rounded-lg p-6">
+          <div className="mt-8 backdrop-blur-xl bg-black/20 border border-green-500/20 rounded-lg p-4 sm:p-6">
             <div className="flex items-start gap-3">
               <Info className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
                 <div className="text-sm text-green-700 space-y-2">
