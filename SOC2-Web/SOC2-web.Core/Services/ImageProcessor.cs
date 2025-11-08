@@ -16,7 +16,7 @@ public record ExtractedFile(string FileName, byte[] Data, byte[] Sha256Hash);
 public class ImageProcessor : IImageProcessor
 {
     private const int BaseHeaderSize = 2 + 8 + 4; // Signature + FileSize + FileNameLength
-    private const int MaxFileSize = 50 * 1024 * 1024; // 50MB
+    private const int MaxFileSize = 20 * 1024 * 1024; // 20MB
     private const int MaxFilenameLength = 255;
     private const int Sha256HashSize = 32;
     private const int BytesPerPixel = 4; // RGBA

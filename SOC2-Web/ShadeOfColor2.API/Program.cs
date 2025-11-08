@@ -20,6 +20,8 @@ builder.Services.Configure<IISServerOptions>(options =>
 builder.Services.Configure<KestrelServerOptions>(options =>
 {
     options.Limits.MaxRequestBodySize = 52428800; // 50MB
+    options.Limits.RequestHeadersTimeout = TimeSpan.FromMinutes(5);
+    options.Limits.KeepAliveTimeout = TimeSpan.FromMinutes(5);
 });
 
 builder.Services.Configure<FormOptions>(options =>
@@ -136,11 +138,11 @@ app.MapPost("/api/hide", async (IFormFile file, IImageProcessor processor, Cance
         
     // Check available memory before processing large files
     var availableMemory = GC.GetTotalMemory(false);
-    if (file.Length > 20 * 1024 * 1024 && availableMemory > 800 * 1024 * 1024) // 20MB file, 800MB memory
+    if (file.Length > 15 * 1024 * 1024 && availableMemory > 500 * 1024 * 1024) // 15MB file, 500MB memory
     {
         GC.Collect();
         GC.WaitForPendingFinalizers();
-        return Results.BadRequest(new { error = "Server memory pressure detected. Please try again in a moment." });
+        return Results.BadRequest(new { error = "Server memory pressure detected. Please try a smaller file or wait a moment." });
     }
 
     try
@@ -284,8 +286,8 @@ static IResult? ValidateUploadedFile(IFormFile file)
     if (file == null || file.Length == 0)
         return Results.BadRequest(new { error = "No file uploaded" });
     
-    if (file.Length > 50 * 1024 * 1024)
-        return Results.BadRequest(new { error = "File too large. Maximum size is 50MB." });
+    if (file.Length > 20 * 1024 * 1024)
+        return Results.BadRequest(new { error = "File too large. Maximum size is 20MB for server stability." });
     
     if (string.IsNullOrWhiteSpace(file.FileName) || file.FileName.Length > 255)
         return Results.BadRequest(new { error = "Invalid filename" });
@@ -299,8 +301,8 @@ static IResult? ValidateUploadedImage(IFormFile image)
     if (image == null || image.Length == 0)
         return Results.BadRequest(new { error = "No image uploaded" });
     
-    if (image.Length > 100 * 1024 * 1024)
-        return Results.BadRequest(new { error = "Image too large. Maximum size is 100MB." });
+    if (image.Length > 50 * 1024 * 1024)
+        return Results.BadRequest(new { error = "Image too large. Maximum size is 50MB for server stability." });
     
     if (!image.ContentType.StartsWith("image/"))
         return Results.BadRequest(new { error = "Invalid file type. Please upload an image." });
