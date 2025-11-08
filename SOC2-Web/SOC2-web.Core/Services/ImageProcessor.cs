@@ -51,8 +51,6 @@ public class ImageProcessor : IImageProcessor
 
         // Calculate SHA256 hash from byte array
         var sha256Hash = SHA256.HashData(fileBytes);
-
-
         
         // Convert filename to bytes
         var fileNameBytes = System.Text.Encoding.UTF8.GetBytes(fileName);
@@ -127,8 +125,6 @@ public class ImageProcessor : IImageProcessor
         WriteBytesToImage(image, startIndex, bytes);
     }
 
-
-
     private void WriteBytesToImage(Image<Rgba32> image, int startIndex, byte[] data)
     {
         image.ProcessPixelRows(accessor =>
@@ -169,67 +165,67 @@ public class ImageProcessor : IImageProcessor
                 imageStream.Position = 0;
             }
             
-            // Load image directly from stream (revert to original approach)
+            // Load image directly from stream
             image = await Image.LoadAsync<Rgba32>(imageStream, cancellationToken);
             
             Console.WriteLine($"[{DateTime.UtcNow}] Image loaded successfully: {image.Width}x{image.Height}");
         
-        // Read and verify signature
-        var signatureBytes = ReadBytesFromImage(image, 0, 2);
-        var signature = System.Text.Encoding.ASCII.GetString(signatureBytes);
-        Console.WriteLine($"[{DateTime.UtcNow}] Read signature: '{signature}', Expected: '{_signature}'");
-        
-        if (signature != _signature)
-            throw new InvalidDataException($"Invalid signature. Found '{signature}', expected '{_signature}'. This is not a ShadeOfColor2 encoded image.");
+            // Read and verify signature
+            var signatureBytes = ReadBytesFromImage(image, 0, 2);
+            var signature = System.Text.Encoding.ASCII.GetString(signatureBytes);
+            Console.WriteLine($"[{DateTime.UtcNow}] Read signature: '{signature}', Expected: '{_signature}'");
+            
+            if (signature != _signature)
+                throw new InvalidDataException($"Invalid signature. Found '{signature}', expected '{_signature}'. This is not a ShadeOfColor2 encoded image.");
 
-        // Read file size
-        var fileSizeBytes = ReadBytesFromImage(image, 2, 8);
-        var fileSize = BitConverter.ToInt64(fileSizeBytes);
-        Console.WriteLine($"[{DateTime.UtcNow}] File size: {fileSize} bytes");
+            // Read file size
+            var fileSizeBytes = ReadBytesFromImage(image, 2, 8);
+            var fileSize = BitConverter.ToInt64(fileSizeBytes);
+            Console.WriteLine($"[{DateTime.UtcNow}] File size: {fileSize} bytes");
 
-        // Read filename length
-        var fileNameLengthBytes = ReadBytesFromImage(image, 10, 4);
-        var fileNameLength = BitConverter.ToInt32(fileNameLengthBytes);
-        Console.WriteLine($"[{DateTime.UtcNow}] Filename length: {fileNameLength}");
+            // Read filename length
+            var fileNameLengthBytes = ReadBytesFromImage(image, 10, 4);
+            var fileNameLength = BitConverter.ToInt32(fileNameLengthBytes);
+            Console.WriteLine($"[{DateTime.UtcNow}] Filename length: {fileNameLength}");
 
-        // Read filename
-        var fileNameBytes = ReadBytesFromImage(image, 14, fileNameLength);
-        var fileName = System.Text.Encoding.UTF8.GetString(fileNameBytes);
-        Console.WriteLine($"[{DateTime.UtcNow}] Filename: '{fileName}'")
+            // Read filename
+            var fileNameBytes = ReadBytesFromImage(image, 14, fileNameLength);
+            var fileName = System.Text.Encoding.UTF8.GetString(fileNameBytes);
+            Console.WriteLine($"[{DateTime.UtcNow}] Filename: '{fileName}'");
 
-        // Calculate SHA256 offset (account for padding)
-        var headerWithoutHash = 2 + 8 + 4 + fileNameLength;
-        var sha256Offset = headerWithoutHash + (4 - (headerWithoutHash % 4)) % 4;
+            // Calculate SHA256 offset (account for padding)
+            var headerWithoutHash = 2 + 8 + 4 + fileNameLength;
+            var sha256Offset = headerWithoutHash + (4 - (headerWithoutHash % 4)) % 4;
 
-        // Read SHA256 hash
-        var sha256Hash = ReadBytesFromImage(image, sha256Offset, Sha256HashSize);
+            // Read SHA256 hash
+            var sha256Hash = ReadBytesFromImage(image, sha256Offset, Sha256HashSize);
 
-        // Read file data using streaming for large files
-        var fileDataOffset = sha256Offset + Sha256HashSize;
-        fileData = ReadBytesFromImage(image, fileDataOffset, (int)fileSize);
+            // Read file data
+            var fileDataOffset = sha256Offset + Sha256HashSize;
+            fileData = ReadBytesFromImage(image, fileDataOffset, (int)fileSize);
 
-        // Dispose image immediately after reading data
-        image.Dispose();
-        image = null;
+            // Dispose image immediately after reading data
+            image.Dispose();
+            image = null;
 
-        // Verify SHA256 hash
-        var computedHash = SHA256.HashData(fileData);
-        if (!computedHash.SequenceEqual(sha256Hash))
-        {
-            // Clear file data on hash mismatch
-            Array.Clear(fileData, 0, fileData.Length);
-            throw new InvalidDataException("SHA256 hash mismatch. File may be corrupted.");
-        }
+            // Verify SHA256 hash
+            var computedHash = SHA256.HashData(fileData);
+            if (!computedHash.SequenceEqual(sha256Hash))
+            {
+                // Clear file data on hash mismatch
+                Array.Clear(fileData, 0, fileData.Length);
+                throw new InvalidDataException("SHA256 hash mismatch. File may be corrupted.");
+            }
 
-        // Force garbage collection for large files
-        if (fileSize > 5 * 1024 * 1024) // 5MB+
-        {
-            GC.Collect();
-            GC.WaitForPendingFinalizers();
-            GC.Collect();
-        }
+            // Force garbage collection for large files
+            if (fileSize > 5 * 1024 * 1024) // 5MB+
+            {
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+                GC.Collect();
+            }
 
-        return new ExtractedFile(fileName, fileData, sha256Hash);
+            return new ExtractedFile(fileName, fileData, sha256Hash);
         }
         catch (OperationCanceledException)
         {
@@ -259,8 +255,6 @@ public class ImageProcessor : IImageProcessor
             GC.WaitForPendingFinalizers();
         }
     }
-    
-
 
     private byte[] ReadBytesFromImage(Image<Rgba32> image, int startIndex, int length)
     {
