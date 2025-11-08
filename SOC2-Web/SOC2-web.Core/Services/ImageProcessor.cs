@@ -78,6 +78,11 @@ public class ImageProcessor : IImageProcessor
         // Write file data from byte array
         WriteBytesToImage(image, pixelIndex, fileBytes);
         
+        // Verify data was written correctly
+        var testSignature = ReadBytesFromImage(image, 0, 2);
+        var testSig = System.Text.Encoding.ASCII.GetString(testSignature);
+        Console.WriteLine($"[{DateTime.UtcNow}] Encryption - Written signature: '{testSig}', Expected: '{_signature}'");
+        
         // Force garbage collection after processing large file
         if (fileSize > 10 * 1024 * 1024) // 10MB+
         {
@@ -170,10 +175,11 @@ public class ImageProcessor : IImageProcessor
             
             Console.WriteLine($"[{DateTime.UtcNow}] Image loaded successfully: {image.Width}x{image.Height}");
         
-            // Read and verify signature
+            // Read and verify signature with hex debugging
             var signatureBytes = ReadBytesFromImage(image, 0, 2);
             var signature = System.Text.Encoding.ASCII.GetString(signatureBytes);
-            Console.WriteLine($"[{DateTime.UtcNow}] Read signature: '{signature}', Expected: '{_signature}'");
+            var hexSig = Convert.ToHexString(signatureBytes);
+            Console.WriteLine($"[{DateTime.UtcNow}] Read signature: '{signature}' (hex: {hexSig}), Expected: '{_signature}' (hex: {Convert.ToHexString(System.Text.Encoding.ASCII.GetBytes(_signature))})");
             
             if (signature != _signature)
                 throw new InvalidDataException($"Invalid signature. Found '{signature}', expected '{_signature}'. This is not a ShadeOfColor2 encoded image.");

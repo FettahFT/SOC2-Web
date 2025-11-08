@@ -160,6 +160,19 @@ app.MapPost("/api/hide", async (IFormFile file, IImageProcessor processor, Cance
         // Convert to byte array to avoid disposal issues
         using var memoryStream = new MemoryStream();
         await encodedImage.SaveAsPngAsync(memoryStream, cancellationToken);
+        
+        // Verify image before disposal by reloading
+        memoryStream.Position = 0;
+        try
+        {
+            using var verifyImage = await Image.LoadAsync<Rgba32>(memoryStream, cancellationToken);
+            Console.WriteLine($"[{DateTime.UtcNow}] Encryption - Image saved and reloaded successfully: {verifyImage.Width}x{verifyImage.Height}");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[{DateTime.UtcNow}] Encryption - Failed to reload saved image: {ex.Message}");
+        }
+        
         encodedImage.Dispose(); // Dispose immediately after saving
         
         var imageBytes = memoryStream.ToArray();
