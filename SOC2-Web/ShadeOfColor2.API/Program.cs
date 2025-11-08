@@ -350,17 +350,22 @@ app.MapPost("/api/extract", async (HttpContext context, IFormFile image, string?
 app.MapPost("/api/metadata", async (IFormFile image, IImageProcessor processor, CancellationToken cancellationToken) =>
 {
     var startTime = DateTime.UtcNow;
-    Console.WriteLine($"[{startTime}] Metadata endpoint accessed - Image: {image?.FileName}");
+    Console.WriteLine($"[{startTime}] Metadata endpoint accessed - Image: {image?.FileName}, Size: {image?.Length}");
 
     // Validate input
     var validationResult = ValidateUploadedImage(image!);
     if (validationResult != null)
+    {
+        Console.WriteLine($"[{DateTime.UtcNow}] Metadata validation failed: {validationResult}");
         return validationResult;
+    }
 
     try
     {
         using var imageStream = image!.OpenReadStream();
+        Console.WriteLine($"[{DateTime.UtcNow}] Extracting metadata...");
         var metadata = await processor.ExtractMetadataAsync(imageStream, cancellationToken);
+        Console.WriteLine($"[{DateTime.UtcNow}] Metadata extracted - Signature: {metadata.Signature}, Size: {metadata.OriginalFileSize}, Name: {metadata.OriginalFileName}, Encrypted: {metadata.IsEncrypted}");
 
         return Results.Ok(new
         {
@@ -379,6 +384,7 @@ app.MapPost("/api/metadata", async (IFormFile image, IImageProcessor processor, 
     catch (Exception ex)
     {
         Console.WriteLine($"[{DateTime.UtcNow}] Metadata endpoint error: {ex.GetType().Name} - {ex.Message}");
+        Console.WriteLine($"[{DateTime.UtcNow}] Stack trace: {ex.StackTrace}");
         return Results.BadRequest(new { error = $"Metadata extraction failed: {ex.Message}" });
     }
     finally

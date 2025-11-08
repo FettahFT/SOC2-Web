@@ -8,11 +8,7 @@ import './App.css';
 function App() {
   const [mode, setMode] = useState('crypt'); // 'crypt' or 'decrypt'
 
-  // Reset file encrypted status when mode changes
-  useEffect(() => {
-    setFileEncrypted(false);
-    setCheckingEncrypted(false);
-  }, [mode]);
+
   const [file, setFile] = useState(null);
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -20,27 +16,11 @@ function App() {
   const [result, setResult] = useState(null);
   const [showIntro, setShowIntro] = useState(true);
   const [dragActive, setDragActive] = useState(false);
-  const [fileEncrypted, setFileEncrypted] = useState(false);
-  const [checkingEncrypted, setCheckingEncrypted] = useState(false);
+
 
   const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5046';
 
-  const checkFileEncrypted = async (file) => {
-    setCheckingEncrypted(true);
-    const formData = new FormData();
-    formData.append('image', file);
 
-    try {
-      const response = await axios.post(`${API_URL}/api/metadata`, formData);
-      setFileEncrypted(response.data.isEncrypted);
-    } catch (error) {
-      console.error('Metadata check failed:', error);
-      // If metadata fails, assume not encrypted
-      setFileEncrypted(false);
-    } finally {
-      setCheckingEncrypted(false);
-    }
-  };
 
   useEffect(() => {
     const timer = setTimeout(() => setShowIntro(false), 2000);
@@ -78,13 +58,6 @@ function App() {
 
       setFile(selectedFile);
       setResult(null);
-
-      // Check if file is encrypted for decrypt mode
-      if (mode === 'decrypt') {
-        checkFileEncrypted(selectedFile);
-      } else {
-        setFileEncrypted(false);
-      }
     }
   };
 
@@ -106,30 +79,11 @@ function App() {
 
       setFile(selectedFile);
       setResult(null);
-
-      // Check if file is encrypted for decrypt mode
-      if (mode === 'decrypt') {
-        checkFileEncrypted(selectedFile);
-      } else {
-        setFileEncrypted(false);
-      }
     }
   };
 
   const handleProcess = async () => {
     if (!file) return;
-
-    // Wait for encryption check if in progress
-    if (checkingEncrypted) {
-      setResult({ success: false, message: 'Checking file encryption status, please wait...' });
-      return;
-    }
-
-    // Check password requirement for encrypted files
-    if (mode === 'decrypt' && fileEncrypted && !password) {
-      setResult({ success: false, message: 'Password is required to decrypt this encrypted file.' });
-      return;
-    }
 
     setLoading(true);
     setProgress(0);
@@ -142,7 +96,7 @@ function App() {
 
     const formData = new FormData();
     formData.append(mode === 'crypt' ? 'file' : 'image', file);
-    if (password) {
+    if (password.trim()) {
       formData.append('password', password);
     }
 
@@ -256,7 +210,7 @@ function App() {
             {/* Password Input */}
             <div className="mb-6">
               <label htmlFor="password" className="block text-sm font-semibold text-green-400 mb-2">
-                Password {mode === 'crypt' ? '(optional for encryption)' : checkingEncrypted ? '(checking file...)' : fileEncrypted ? '(required for this encrypted file)' : '(optional)'}
+                Password (optional - leave empty for no encryption)
               </label>
               <input
                 type="password"
