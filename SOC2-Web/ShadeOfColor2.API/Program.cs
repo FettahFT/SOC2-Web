@@ -146,7 +146,7 @@ app.MapPost("/api/hide", async (IFormFile file, IImageProcessor processor) =>
     try
     {
         using var fileStream = file.OpenReadStream();
-        using var encodedImage = await processor.CreateCarrierImageAsync(
+        var encodedImage = await processor.CreateCarrierImageAsync(
             fileStream, 
             Path.GetFileName(file.FileName)
         );
@@ -154,12 +154,15 @@ app.MapPost("/api/hide", async (IFormFile file, IImageProcessor processor) =>
         // Generate random PNG name to hide original file type
         var randomName = $"image_{Guid.NewGuid().ToString("N")[..8]}.png";
         
-        // Stream response directly without loading into memory
-        return Results.Stream(
-            async stream =>
-            {
-                await encodedImage.SaveAsPngAsync(stream);
-            },
+        // Convert to byte array to avoid disposal issues
+        using var memoryStream = new MemoryStream();
+        await encodedImage.SaveAsPngAsync(memoryStream);
+        encodedImage.Dispose(); // Dispose immediately after saving
+        
+        var imageBytes = memoryStream.ToArray();
+        
+        return Results.File(
+            imageBytes,
             "image/png",
             randomName
         );
@@ -226,12 +229,9 @@ app.MapPost("/api/extract", async (HttpContext context, IFormFile image, IImageP
         // Add custom header for reliable filename extraction
         context.Response.Headers["X-Original-Filename"] = originalFileName;
         
-        // Stream response for large files
-        return Results.Stream(
-            async stream =>
-            {
-                await stream.WriteAsync(extractedFile.Data);
-            },
+        // Return file directly
+        return Results.File(
+            extractedFile.Data,
             "application/octet-stream",
             originalFileName
         );
