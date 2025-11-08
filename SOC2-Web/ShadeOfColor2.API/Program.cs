@@ -103,7 +103,9 @@ app.MapGet("/", () =>
 // Encode endpoint - hide file in image
 app.MapPost("/api/hide", async (IFormFile file, IImageProcessor processor) =>
 {
-    Console.WriteLine($"[{DateTime.UtcNow}] Hide endpoint accessed - File: {file?.FileName}");
+    var startTime = DateTime.UtcNow;
+    var initialMemory = GC.GetTotalMemory(false);
+    Console.WriteLine($"[{startTime}] Hide endpoint accessed - File: {file?.FileName}, Initial Memory: {initialMemory / 1024 / 1024}MB");
     
     // Validate input
     var validationResult = ValidateUploadedFile(file);
@@ -113,19 +115,21 @@ app.MapPost("/api/hide", async (IFormFile file, IImageProcessor processor) =>
     try
     {
         using var fileStream = file.OpenReadStream();
-        var encodedImage = await processor.CreateCarrierImageAsync(
+        using var encodedImage = await processor.CreateCarrierImageAsync(
             fileStream, 
             Path.GetFileName(file.FileName)
         );
 
-        using var outputStream = new MemoryStream();
-        await encodedImage.SaveAsPngAsync(outputStream);
-        
         // Generate random PNG name to hide original file type
         var randomName = $"image_{Guid.NewGuid().ToString("N")[..8]}.png";
-        return Results.File(
-            outputStream.ToArray(), 
-            "image/png", 
+        
+        // Stream response directly without loading into memory
+        return Results.Stream(
+            async stream =>
+            {
+                await encodedImage.SaveAsPngAsync(stream);
+            },
+            "image/png",
             randomName
         );
     }
@@ -133,9 +137,17 @@ app.MapPost("/api/hide", async (IFormFile file, IImageProcessor processor) =>
     {
         return Results.BadRequest(new { error = ex.Message });
     }
-    catch (Exception)
+    catch (Exception ex)
     {
+        Console.WriteLine($"[{DateTime.UtcNow}] Hide endpoint error: {ex.Message}");
         return Results.Problem("An error occurred while processing the file");
+    }
+    finally
+    {
+        var endTime = DateTime.UtcNow;
+        var finalMemory = GC.GetTotalMemory(true);
+        var duration = endTime - startTime;
+        Console.WriteLine($"[{endTime}] Hide endpoint completed - Duration: {duration.TotalSeconds:F2}s, Final Memory: {finalMemory / 1024 / 1024}MB, Memory Delta: {(finalMemory - initialMemory) / 1024 / 1024}MB");
     }
 })
 .DisableAntiforgery()
@@ -146,7 +158,9 @@ app.MapPost("/api/hide", async (IFormFile file, IImageProcessor processor) =>
 // Decode endpoint - extract file from image
 app.MapPost("/api/extract", async (HttpContext context, IFormFile image, IImageProcessor processor) =>
 {
-    Console.WriteLine($"[{DateTime.UtcNow}] Extract endpoint accessed - Image: {image?.FileName}");
+    var startTime = DateTime.UtcNow;
+    var initialMemory = GC.GetTotalMemory(false);
+    Console.WriteLine($"[{startTime}] Extract endpoint accessed - Image: {image?.FileName}, Initial Memory: {initialMemory / 1024 / 1024}MB");
     
     // Validate input
     var validationResult = ValidateUploadedImage(image);
@@ -160,13 +174,17 @@ app.MapPost("/api/extract", async (HttpContext context, IFormFile image, IImageP
         
         // Use the original filename stored in the image (includes extension)
         var originalFileName = extractedFile.FileName;
-        Console.WriteLine($"[{DateTime.UtcNow}] Extracted file: {originalFileName}");
+        Console.WriteLine($"[{DateTime.UtcNow}] Extracted file: {originalFileName}, Size: {extractedFile.Data.Length / 1024 / 1024}MB");
         
         // Add custom header for reliable filename extraction
         context.Response.Headers["X-Original-Filename"] = originalFileName;
         
-        return Results.File(
-            extractedFile.Data,
+        // Stream response for large files
+        return Results.Stream(
+            async stream =>
+            {
+                await stream.WriteAsync(extractedFile.Data);
+            },
             "application/octet-stream",
             originalFileName
         );
@@ -175,9 +193,17 @@ app.MapPost("/api/extract", async (HttpContext context, IFormFile image, IImageP
     {
         return Results.BadRequest(new { error = ex.Message });
     }
-    catch (Exception)
+    catch (Exception ex)
     {
+        Console.WriteLine($"[{DateTime.UtcNow}] Extract endpoint error: {ex.Message}");
         return Results.Problem("An error occurred while extracting the file");
+    }
+    finally
+    {
+        var endTime = DateTime.UtcNow;
+        var finalMemory = GC.GetTotalMemory(true);
+        var duration = endTime - startTime;
+        Console.WriteLine($"[{endTime}] Extract endpoint completed - Duration: {duration.TotalSeconds:F2}s, Final Memory: {finalMemory / 1024 / 1024}MB, Memory Delta: {(finalMemory - initialMemory) / 1024 / 1024}MB");
     }
 })
 .DisableAntiforgery()

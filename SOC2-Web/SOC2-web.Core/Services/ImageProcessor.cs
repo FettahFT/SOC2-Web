@@ -29,25 +29,21 @@ public class ImageProcessor : IImageProcessor
 
     public async Task<Image<Rgba32>> CreateCarrierImageAsync(Stream fileData, string fileName, CancellationToken cancellationToken = default)
     {
-        // Read file data efficiently
-        byte[] fileBytes;
-        if (fileData is MemoryStream ms)
-        {
-            fileBytes = ms.ToArray();
-        }
-        else
-        {
-            using var memoryStream = new MemoryStream();
-            await fileData.CopyToAsync(memoryStream, cancellationToken);
-            fileBytes = memoryStream.ToArray();
-        }
-
-        // Calculate SHA256 hash
-        var sha256Hash = SHA256.HashData(fileBytes);
-
-        // Validate file size
-        if (fileBytes.Length > MaxFileSize)
+        // Get file size first
+        var fileSize = fileData.CanSeek ? fileData.Length : await GetStreamLengthAsync(fileData, cancellationToken);
+        
+        // Validate file size early
+        if (fileSize > MaxFileSize)
             throw new ArgumentException($"File too large. Maximum size is {MaxFileSize / (1024 * 1024)}MB.");
+
+        // Calculate SHA256 hash using streaming
+        var sha256Hash = await CalculateHashStreamingAsync(fileData, cancellationToken);
+        
+        // Reset stream position for reading
+        if (fileData.CanSeek)
+            fileData.Position = 0;
+
+
         
         // Convert filename to bytes
         var fileNameBytes = System.Text.Encoding.UTF8.GetBytes(fileName);
@@ -60,7 +56,7 @@ public class ImageProcessor : IImageProcessor
         var totalHeaderSize = headerWithFilename + padding + Sha256HashSize;
         
         // Calculate required pixels
-        var totalDataSize = totalHeaderSize + fileBytes.Length;
+        var totalDataSize = totalHeaderSize + fileSize;
         var pixelCount = (int)Math.Ceiling(totalDataSize / (double)BytesPerPixel);
         var imageSize = (int)Math.Ceiling(Math.Sqrt(pixelCount));
 
@@ -69,11 +65,18 @@ public class ImageProcessor : IImageProcessor
         var pixelIndex = 0;
 
         // Write header
-        WriteHeader(image, pixelIndex, fileBytes.Length, fileNameBytes, sha256Hash);
+        WriteHeader(image, pixelIndex, fileSize, fileNameBytes, sha256Hash);
         pixelIndex += totalHeaderSize;
 
-        // Write file data
-        WriteFileData(image, pixelIndex, fileBytes);
+        // Write file data using streaming
+        await WriteFileDataStreamingAsync(image, pixelIndex, fileData, cancellationToken);
+        
+        // Force garbage collection after processing large file
+        if (fileSize > 10 * 1024 * 1024) // 10MB+
+        {
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+        }
 
         return image;
     }
@@ -115,9 +118,50 @@ public class ImageProcessor : IImageProcessor
         WriteBytesToImage(image, startIndex, bytes);
     }
 
-    private void WriteFileData(Image<Rgba32> image, int startIndex, byte[] fileData)
+    private async Task WriteFileDataStreamingAsync(Image<Rgba32> image, int startIndex, Stream fileData, CancellationToken cancellationToken)
     {
-        WriteBytesToImage(image, startIndex, fileData);
+        const int chunkSize = 1024 * 1024; // 1MB chunks
+        var buffer = new byte[chunkSize];
+        var currentIndex = startIndex;
+        int bytesRead;
+        
+        while ((bytesRead = await fileData.ReadAsync(buffer, 0, chunkSize, cancellationToken)) > 0)
+        {
+            // Only process the bytes actually read
+            var chunk = bytesRead == chunkSize ? buffer : buffer[..bytesRead];
+            WriteBytesToImage(image, currentIndex, chunk);
+            currentIndex += bytesRead;
+            
+            // Clear buffer for memory efficiency
+            Array.Clear(buffer, 0, bytesRead);
+        }
+    }
+    
+    private async Task<byte[]> CalculateHashStreamingAsync(Stream stream, CancellationToken cancellationToken)
+    {
+        using var sha256 = SHA256.Create();
+        const int bufferSize = 64 * 1024; // 64KB buffer
+        var buffer = new byte[bufferSize];
+        int bytesRead;
+        
+        while ((bytesRead = await stream.ReadAsync(buffer, 0, bufferSize, cancellationToken)) > 0)
+        {
+            sha256.TransformBlock(buffer, 0, bytesRead, null, 0);
+        }
+        
+        sha256.TransformFinalBlock(Array.Empty<byte>(), 0, 0);
+        return sha256.Hash ?? throw new InvalidOperationException("Hash calculation failed");
+    }
+    
+    private async Task<long> GetStreamLengthAsync(Stream stream, CancellationToken cancellationToken)
+    {
+        if (stream.CanSeek)
+            return stream.Length;
+            
+        // For non-seekable streams, we need to read to get length
+        using var tempStream = new MemoryStream();
+        await stream.CopyToAsync(tempStream, cancellationToken);
+        return tempStream.Length;
     }
 
     private void WriteBytesToImage(Image<Rgba32> image, int startIndex, byte[] data)
@@ -150,6 +194,7 @@ public class ImageProcessor : IImageProcessor
 
     public async Task<ExtractedFile> ExtractFileAsync(Stream imageStream, CancellationToken cancellationToken = default)
     {
+        Image<Rgba32>? image = null;
         try
         {
             // Reset stream position if possible
@@ -166,7 +211,7 @@ public class ImageProcessor : IImageProcessor
             }
                 
             // Load image
-            var image = await Image.LoadAsync<Rgba32>(imageStream, cancellationToken);
+            image = await Image.LoadAsync<Rgba32>(imageStream, cancellationToken);
         
         // Read and verify signature
         var signatureBytes = ReadBytesFromImage(image, 0, 2);
@@ -193,14 +238,21 @@ public class ImageProcessor : IImageProcessor
         // Read SHA256 hash
         var sha256Hash = ReadBytesFromImage(image, sha256Offset, Sha256HashSize);
 
-        // Read file data
+        // Read file data using streaming for large files
         var fileDataOffset = sha256Offset + Sha256HashSize;
-        var fileData = ReadBytesFromImage(image, fileDataOffset, (int)fileSize);
+        var fileData = await ReadFileDataStreamingAsync(image, fileDataOffset, (int)fileSize, cancellationToken);
 
         // Verify SHA256 hash
         var computedHash = SHA256.HashData(fileData);
         if (!computedHash.SequenceEqual(sha256Hash))
             throw new InvalidDataException("SHA256 hash mismatch. File may be corrupted.");
+
+        // Force garbage collection for large files
+        if (fileSize > 10 * 1024 * 1024) // 10MB+
+        {
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+        }
 
         return new ExtractedFile(fileName, fileData, sha256Hash);
         }
@@ -208,6 +260,37 @@ public class ImageProcessor : IImageProcessor
         {
             throw new InvalidDataException($"Failed to extract file from image: {ex.Message}", ex);
         }
+        finally
+        {
+            // Ensure proper disposal
+            image?.Dispose();
+        }
+    }
+    
+    private async Task<byte[]> ReadFileDataStreamingAsync(Image<Rgba32> image, int startIndex, int length, CancellationToken cancellationToken)
+    {
+        const int chunkSize = 1024 * 1024; // 1MB chunks
+        var result = new byte[length];
+        var processedBytes = 0;
+        
+        while (processedBytes < length)
+        {
+            var remainingBytes = length - processedBytes;
+            var currentChunkSize = Math.Min(chunkSize, remainingBytes);
+            
+            var chunk = ReadBytesFromImage(image, startIndex + processedBytes, currentChunkSize);
+            Array.Copy(chunk, 0, result, processedBytes, currentChunkSize);
+            
+            processedBytes += currentChunkSize;
+            
+            // Yield control for cancellation and memory pressure
+            if (cancellationToken.IsCancellationRequested)
+                cancellationToken.ThrowIfCancellationRequested();
+                
+            await Task.Yield();
+        }
+        
+        return result;
     }
 
     private byte[] ReadBytesFromImage(Image<Rgba32> image, int startIndex, int length)
