@@ -370,33 +370,16 @@ function App() {
               </div>
             )}
             
-            {result && (
-              <div className={`mt-6 liquid-glass border rounded-xl p-4 sm:p-6 neon-border card-hover animate-fade-in ${result.success ? 'border-green-500/60' : 'border-red-500/60'}`}>
+            {result && !result.success && (
+              <div className="mt-6 liquid-glass border rounded-xl p-4 sm:p-6 neon-border card-hover animate-fade-in border-red-500/60">
                 <div className="flex items-start gap-4">
-                  {result.success ? (
-                    <CheckCircle className="w-6 h-6 text-green-400 flex-shrink-0 mt-1 pulse" />
-                  ) : (
-                    <XCircle className="w-6 h-6 text-red-400 flex-shrink-0 mt-1" />
-                  )}
+                  <XCircle className="w-6 h-6 text-red-400 flex-shrink-0 mt-1" />
                   <div className="flex-1">
                     <h3 className="text-lg font-semibold text-green-400 mb-3 flex items-center gap-2">
-                      <span className="inline-block w-2 h-2 bg-green-400 rounded-full animate-pulse"></span>
-                      &gt; {result.success ? 'SUCCESS' : 'ERROR'}
+                      <span className="inline-block w-2 h-2 bg-red-400 rounded-full animate-pulse"></span>
+                      &gt; ERROR
                     </h3>
-                    {result.success ? (
-                      <div className="space-y-3 text-sm">
-                        <div className="flex justify-between items-center liquid-glass rounded p-2">
-                          <span className="text-green-600">Output:</span>
-                          <span className="text-white font-medium">{result.filename}</span>
-                        </div>
-                        <div className="flex justify-between items-center liquid-glass rounded p-2">
-                          <span className="text-green-600">Size:</span>
-                          <span className="text-white font-medium">{result.size}</span>
-                        </div>
-                      </div>
-                    ) : (
-                      <p className="text-red-400">{result.message}</p>
-                    )}
+                    <p className="text-red-400">{result.message}</p>
                   </div>
                 </div>
               </div>
