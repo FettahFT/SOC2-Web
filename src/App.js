@@ -5,13 +5,13 @@ import MatrixRain from './components/MatrixRain';
 import ClientImageProcessor from './services/ClientImageProcessor';
 import './App.css';
 
-const FileDropzone = ({ onDrop, file, title, subtitle, accept, error }) => {
+const FileDropzone = ({ onDrop, file, title, subtitle, accept, error, className = '' }) => {
   const [dragActive, setDragActive] = useState(false);
   const handleDrag = (e) => { e.preventDefault(); e.stopPropagation(); if (e.type === 'dragenter' || e.type === 'dragover') setDragActive(true); else if (e.type === 'dragleave') setDragActive(false); };
   const handleDrop = (e) => { e.preventDefault(); e.stopPropagation(); setDragActive(false); if (e.dataTransfer.files?.[0]) onDrop(e.dataTransfer.files[0]); };
   const handleFileChange = (e) => { if (e.target.files?.[0]) onDrop(e.target.files[0]); };
   return (
-    <div onDragEnter={handleDrag} onDragLeave={handleDrag} onDragOver={handleDrag} onDrop={handleDrop} className={`relative border-2 border-dashed rounded-xl p-6 text-center transition-all duration-300 dropzone-hover ${dragActive ? 'border-green-400 bg-green-500/10 scale-105' : 'border-green-500/40 hover:border-green-400/60'} ${error ? 'border-red-500/60' : ''}`}>
+    <div onDragEnter={handleDrag} onDragLeave={handleDrag} onDragOver={handleDrag} onDrop={handleDrop} className={`relative border-2 border-dashed rounded-xl p-6 sm:p-8 md:p-10 min-h-[250px] sm:min-h-[300px] md:min-h-[350px] flex flex-col justify-center items-center transition-all duration-300 dropzone-hover ${className} ${dragActive ? 'border-green-400 bg-green-500/10 scale-105' : 'border-green-500/40 hover:border-green-400/60'} ${error ? 'border-red-500/60' : ''}`}>
       <input type="file" onChange={handleFileChange} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" accept={accept} />
       <div className="scanline"></div>
       {file ? (
@@ -44,6 +44,7 @@ function App() {
   const [shakePassword, setShakePassword] = useState(false);
   const [metadata, setMetadata] = useState(null);
   const [metadataError, setMetadataError] = useState(null);
+  const [metadataLoading, setMetadataLoading] = useState(false);
   const [carrierImgSize, setCarrierImgSize] = useState(null);
   const [carrierError, setCarrierError] = useState(null);
   const [payloadTooLargeError, setPayloadTooLargeError] = useState(null);
@@ -66,10 +67,12 @@ function App() {
 
   useEffect(() => {
     if (mode === 'decrypt' && payloadFile) {
-      ClientImageProcessor.extractMetadataAsync(payloadFile).then(setMetadata).catch(err => setMetadataError(err.message));
+      setMetadataLoading(true);
+      ClientImageProcessor.extractMetadataAsync(payloadFile).then(setMetadata).catch(err => setMetadataError(err.message)).finally(() => setMetadataLoading(false));
     } else {
       setMetadata(null);
       setMetadataError(null);
+      setMetadataLoading(false);
     }
   }, [payloadFile, mode]);
 
@@ -180,8 +183,8 @@ function App() {
     const capacityForDepth = (depth) => carrierImgSize ? Math.floor((carrierImgSize.width * carrierImgSize.height * 3 * depth) / 8) : 0;
     return (
       <>
-        <div className="max-w-2xl mx-auto mt-8 mb-8 animate-slide-in-left">
-          <div className="liquid-glass rounded-xl p-3 neon-border">
+        <div className="max-w-2xl mx-auto mb-4 sm:mb-6 animate-slide-in-left">
+          <div className="liquid-glass rounded-xl p-1 neon-border">
             <div className="mode-selector-container grid grid-cols-2 gap-1 sm:gap-2">
               <div className={`moving-border ${stegoMode === 'lsb' ? 'decrypt' : ''}`}></div>
               <button onClick={() => setStegoMode('generate')} className="mode-selector-button flex items-center justify-center gap-2 py-3 px-4 sm:py-4 sm:px-6 text-green-400 transition-all duration-300" style={{ outline: 'none', boxShadow: 'none', border: 'none', backgroundColor: 'transparent' }}>
@@ -243,39 +246,43 @@ function App() {
 
   const renderDecryptMode = () => (
     <div className="animate-fade-in">
-      <FileDropzone onDrop={setPayloadFile} file={payloadFile} title="Drop PNG to Extract From" subtitle="or click to browse" accept="image/png" />
-      {mode === 'decrypt' && payloadFile && metadata && (
-        <div className="mt-4 pt-4 border-t border-green-500/20 text-left animate-slide-in-right">
+      <FileDropzone onDrop={setPayloadFile} file={payloadFile} title="Drop PNG to Extract From" subtitle="or click to browse" accept="image/png" className="min-h-[450px] sm:min-h-[500px] md:min-h-[550px]" />
+      {mode === 'decrypt' && payloadFile && (metadataLoading || metadata) && (
+        <div className="mt-4 pt-4 border-t border-green-500/20 text-left animate-fade-in">
           <h4 className="flex items-center gap-2 text-green-400 font-bold mb-3">
-            <ScanEye className="w-5 h-5 pulse"/> 
+            <ScanEye className="w-5 h-5 pulse"/>
             Embedded File Info:
           </h4>
           <div className="liquid-glass rounded-lg p-4">
-            <div className="space-y-3 text-sm">
-              <div className="flex justify-between items-center group">
-                <span className="text-green-600 flex items-center gap-2">
-                  <FileImage className="w-4 h-4" />
-                  Filename:
-                </span>
-                <span className="text-white truncate ml-4 font-medium" title={metadata.fileName}>{metadata.fileName}</span>
+            {metadataLoading ? (
+              <p className="text-green-400 text-sm">Extracting metadata...</p>
+            ) : (
+              <div className="space-y-3 text-sm">
+                <div className="flex justify-between items-center group">
+                  <span className="text-green-600 flex items-center gap-2">
+                    <FileImage className="w-4 h-4" />
+                    Filename:
+                  </span>
+                  <span className="text-white truncate ml-4 font-medium" title={metadata.fileName}>{metadata.fileName}</span>
+                </div>
+                <div className="flex justify-between items-center group">
+                  <span className="text-green-600 flex items-center gap-2">
+                    <Database className="w-4 h-4" />
+                    Size:
+                  </span>
+                  <span className="text-white font-medium">{(metadata.fileSize / 1024).toFixed(2)} KB</span>
+                </div>
+                <div className="flex justify-between items-center group">
+                  <span className="text-green-600 flex items-center gap-2">
+                    <Shield className="w-4 h-4" />
+                    Encrypted:
+                  </span>
+                  <span className={`font-medium ${metadata.isEncrypted ? 'text-green-400' : 'text-gray-400'}`}>
+                    {metadata.isEncrypted ? 'Yes' : 'No'}
+                  </span>
+                </div>
               </div>
-              <div className="flex justify-between items-center group">
-                <span className="text-green-600 flex items-center gap-2">
-                  <Database className="w-4 h-4" />
-                  Size:
-                </span>
-                <span className="text-white font-medium">{(metadata.fileSize / 1024).toFixed(2)} KB</span>
-              </div>
-              <div className="flex justify-between items-center group">
-                <span className="text-green-600 flex items-center gap-2">
-                  <Shield className="w-4 h-4" />
-                  Encrypted:
-                </span>
-                <span className={`font-medium ${metadata.isEncrypted ? 'text-green-400' : 'text-gray-400'}`}>
-                  {metadata.isEncrypted ? 'Yes' : 'No'}
-                </span>
-              </div>
-            </div>
+            )}
           </div>
         </div>
       )}
@@ -314,12 +321,12 @@ function App() {
           </div>
         </div>
         
-        <div className="max-w-6xl mx-auto mt-16">
-          <div className="liquid-glass-dark rounded-2xl p-6 sm:p-8 md:p-12 card-hover">
+        <div className="max-w-6xl mx-auto mt-8 sm:mt-16">
+          <div className="liquid-glass-dark rounded-2xl p-2 sm:p-4 md:p-6 lg:p-10 min-h-[400px] sm:min-h-[500px] card-hover">
             <div className="scanline"></div>
             {mode === 'crypt' ? renderCryptMode() : renderDecryptMode()}
             {payloadFile && (
-              <div className="mt-6 space-y-4 animate-fade-in">
+              <div className="mt-4 space-y-4 animate-fade-in">
                 <div className="relative liquid-glass rounded-lg overflow-hidden">
                   <KeyRound className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-green-700 z-10" />
                   <input
@@ -371,7 +378,7 @@ function App() {
             )}
 
             {result && !result.success && (
-              <div className="mt-6 liquid-glass border rounded-xl p-4 sm:p-6 neon-border card-hover animate-fade-in border-red-500/60">
+              <div className="mt-4 liquid-glass border rounded-xl p-4 sm:p-6 neon-border card-hover animate-fade-in border-red-500/60">
                 <div className="flex items-start gap-4">
                   <XCircle className="w-6 h-6 text-red-400 flex-shrink-0 mt-1" />
                   <div className="flex-1">
@@ -387,8 +394,8 @@ function App() {
           </div>
         </div>
         
-        <div className="max-w-3xl mx-auto mt-8 animate-slide-in-left">
-          <div className="liquid-glass-dark rounded-2xl p-4 sm:p-6 md:p-8 card-hover">
+        <div className="max-w-3xl mx-auto mt-6 sm:mt-8 animate-slide-in-left">
+          <div className="liquid-glass-dark rounded-2xl p-2 sm:p-4 md:p-6 lg:p-8 card-hover">
             <h2 className="text-lg sm:text-xl font-bold text-green-400 mb-6 text-center flex items-center justify-center gap-2">
               <span className="inline-block w-2 h-2 bg-green-400 rounded-full animate-pulse"></span>
               &gt; HOW TO USE
