@@ -314,8 +314,8 @@ function App() {
           </div>
         </div>
         
-        <div className="max-w-6xl mx-auto">
-          <div className="liquid-glass-dark rounded-2xl p-4 sm:p-6 md:p-8 card-hover">
+        <div className="max-w-6xl mx-auto mt-16">
+          <div className="liquid-glass-dark rounded-2xl p-6 sm:p-8 md:p-12 card-hover">
             <div className="scanline"></div>
             {mode === 'crypt' ? renderCryptMode() : renderDecryptMode()}
             {payloadFile && (
