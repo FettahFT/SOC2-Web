@@ -301,6 +301,51 @@ function App() {
             )}
           </div>
         </div>
+        
+        <div className="max-w-4xl mx-auto mt-8">
+          <div className="backdrop-blur-2xl bg-gradient-to-br from-black/50 to-green-950/10 border border-green-500/30 rounded-2xl p-4 sm:p-6 md:p-8 shadow-[0_0_50px_rgba(0,255,65,0.2)]">
+            <h2 className="text-xl sm:text-2xl font-bold text-green-400 mb-4 text-center">&gt; HOW TO USE</h2>
+            <div className="grid md:grid-cols-2 gap-6 text-sm text-green-300">
+              <div>
+                <h3 className="text-green-400 font-semibold mb-2">HIDE MODE:</h3>
+                <ul className="space-y-1 text-green-600">
+                  <li>• Choose "New Image" or "Existing Image"</li>
+                  <li>• Drop your secret file</li>
+                  <li>• For existing image: drop carrier PNG</li>
+                  <li>• Add password (optional)</li>
+                  <li>• Click "HIDE FILE"</li>
+                </ul>
+              </div>
+              <div>
+                <h3 className="text-green-400 font-semibold mb-2">EXTRACT MODE:</h3>
+                <ul className="space-y-1 text-green-600">
+                  <li>• Drop the carrier PNG image</li>
+                  <li>• Enter password if encrypted</li>
+                  <li>• Click "EXTRACT FILE"</li>
+                  <li>• Original file downloads automatically</li>
+                </ul>
+              </div>
+            </div>
+            <div className="mt-6 pt-4 border-t border-green-500/20">
+              <h3 className="text-green-400 font-semibold mb-2 text-center">FEATURES:</h3>
+              <div className="text-center text-green-600 text-sm">
+                <span>100% Client-Side • AES-256 Encryption • SHA-256 Integrity • LSB Steganography • Large File Support</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <footer className="text-center mt-8 text-green-600 text-sm">
+          <div className="space-x-4">
+            <a href="https://github.com/archistico/ShadeOfColor2" target="_blank" rel="noopener noreferrer" className="hover:text-green-400 transition-colors">
+              Original C# Project
+            </a>
+            <span>•</span>
+            <a href="https://github.com/FettahFT/SOC2-web" target="_blank" rel="noopener noreferrer" className="hover:text-green-400 transition-colors">
+              Web App Fork
+            </a>
+          </div>
+        </footer>
       </div>
     </div>
   );
